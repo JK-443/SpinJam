@@ -6,6 +6,7 @@ from custom_components.spinjam.source import (
     SourceSnapshot,
     estimate_position,
     is_line_in_source,
+    is_passthrough_source,
     select_active_source,
 )
 
@@ -15,6 +16,7 @@ def test_is_line_in_source() -> None:
     assert is_line_in_source("LINE_IN")
     assert not is_line_in_source("Spotify")
     assert not is_line_in_source(None)
+    assert is_passthrough_source("hdmi arc")
 
 
 def test_estimate_position_advances_while_playing() -> None:

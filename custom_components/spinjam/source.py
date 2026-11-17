@@ -6,7 +6,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from .const import LINE_IN_SOURCES, SOURCE_KIND_LINE_IN, SOURCE_KIND_STREAM, SOURCE_KIND_VINYL
+from .const import (
+    IGNORED_PASSTHROUGH_SOURCES,
+    LINE_IN_SOURCES,
+    SOURCE_KIND_LINE_IN,
+    SOURCE_KIND_STREAM,
+    SOURCE_KIND_VINYL,
+)
 
 
 def _utcnow() -> datetime:
@@ -17,6 +23,22 @@ def is_line_in_source(source: str | None) -> bool:
     if not source:
         return False
     return source.strip().lower() in LINE_IN_SOURCES
+
+
+def is_passthrough_source(source: str | None) -> bool:
+    """Return True for TV / HDMI / line-in / optical-style input sources."""
+    if not source:
+        return False
+    return source.strip().lower() in IGNORED_PASSTHROUGH_SOURCES
+
+
+def is_tv_placeholder_track(
+    title: str | None, artist: str | None
+) -> bool:
+    """True when metadata is just a bare 'TV' label with no artist."""
+    if artist and str(artist).strip():
+        return False
+    return (title or "").strip().lower() == "tv"
 
 
 def estimate_position(
@@ -137,9 +159,12 @@ def select_active_source(
             elif vinyl_entity_id and entity_id == vinyl_entity_id:
                 kind = SOURCE_KIND_VINYL
             else:
-                # Line-in without vinyl metadata — skip unless vinyl is this entity
-                if not (effective.title or effective.artist):
-                    continue
+                # Line-in / passthrough without a vinyl capture node — ignore
+                # (avoids tracking HDMI-ARC "TV" after a Cast wake).
+                continue
+        elif is_passthrough_source(snap.source):
+            # TV / HDMI / optical input — not a music now-playing source.
+            continue
 
         if vinyl_entity_id and entity_id == vinyl_entity_id:
             kind = SOURCE_KIND_VINYL
@@ -152,6 +177,9 @@ def select_active_source(
             # Still allow playing without meta for vinyl node while identifying
             if kind == SOURCE_KIND_STREAM:
                 continue
+        if is_tv_placeholder_track(effective.title, effective.artist):
+            # Soundbar/ARC often exposes media_title="TV" with no artist.
+            continue
 
         recency = effective.position_updated_at or effective.last_changed or datetime.fromtimestamp(0, tz=timezone.utc)
         not_playing = effective.state != "playing"
