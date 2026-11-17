@@ -18,7 +18,12 @@ from custom_components.spinjam.const import (
     DOMAIN,
     LEGACY_DASHBOARD_PATH,
 )
-from custom_components.spinjam.dashboard import validate_dashboard_url_path
+from custom_components.spinjam.dashboard import (
+    DETAILS_CARD,
+    LYRICS_CARD,
+    spinjam_tv_view_config,
+    validate_dashboard_url_path,
+)
 from custom_components.spinjam import async_migrate_entry
 from custom_components.spinjam.coordinator import SpinJamCoordinator
 
@@ -39,6 +44,20 @@ def test_dashboard_path_requires_hyphen() -> None:
         validate_dashboard_url_path("SpinJam-TV")
     with pytest.raises(vol.Invalid):
         validate_dashboard_url_path("bad_path")
+
+
+def test_tv_view_layout_details_left_lyrics_right() -> None:
+    view = spinjam_tv_view_config("now")
+    assert view["type"] == "panel"
+    assert view["path"] == "now"
+    stack = view["cards"][0]
+    assert stack["type"] == "horizontal-stack"
+    left, right = stack["cards"]
+    assert left["type"] == "custom:spinjam-lyrics-card"
+    assert left["mode"] == "details"
+    assert right["mode"] == "lyrics"
+    assert left["offset_entity"] == "number.spinjam_lyric_offset"
+    assert right["offset_entity"] == DETAILS_CARD["offset_entity"] == LYRICS_CARD["offset_entity"]
 
 
 @pytest.mark.asyncio

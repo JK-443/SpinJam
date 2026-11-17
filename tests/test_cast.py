@@ -188,6 +188,77 @@ async def test_lyric_offset_positive_means_later(hass: HomeAssistant) -> None:
 
 
 @pytest.mark.asyncio
+async def test_cast_quits_when_card_version_changes(hass: HomeAssistant) -> None:
+    """Cast receivers cache resources; quit before re-cast when card hash changes."""
+    entry = _entry(unique_id=f"{DOMAIN}_cast_version")
+    entry.add_to_hass(hass)
+    coordinator = SpinJamCoordinator(hass, entry)
+    display = "media_player.example_tv"
+    coordinator._cast_card_version_by_display[display] = "oldhash"  # noqa: SLF001
+
+    with (
+        patch(
+            "custom_components.spinjam.coordinator.card_file_hash",
+            return_value="newhash",
+        ),
+        patch(
+            "custom_components.spinjam.coordinator.async_end_cast",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as end,
+        patch(
+            "custom_components.spinjam.coordinator.async_show_now_playing",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as show,
+    ):
+        await coordinator._async_cast_lovelace_view(  # noqa: SLF001
+            display, dashboard_path="spinjam-tv", view_path="now"
+        )
+
+    end.assert_awaited_once_with(hass, display)
+    show.assert_awaited_once()
+    assert coordinator._cast_card_version_by_display[display] == "newhash"  # noqa: SLF001
+
+    # Same version again → no quit
+    with (
+        patch(
+            "custom_components.spinjam.coordinator.card_file_hash",
+            return_value="newhash",
+        ),
+        patch(
+            "custom_components.spinjam.coordinator.async_end_cast",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as end2,
+        patch(
+            "custom_components.spinjam.coordinator.async_show_now_playing",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+    ):
+        await coordinator._async_cast_lovelace_view(  # noqa: SLF001
+            display, dashboard_path="spinjam-tv", view_path="now"
+        )
+    end2.assert_not_awaited()
+    await coordinator.async_shutdown()
+    await hass.async_stop()
+
+
+@pytest.mark.asyncio
+async def test_async_set_lyric_offset_updates_options(hass: HomeAssistant) -> None:
+    entry = _entry(unique_id=f"{DOMAIN}_num_offset", **{CONF_LYRIC_OFFSET_MS: 0})
+    entry.add_to_hass(hass)
+    coordinator = SpinJamCoordinator(hass, entry)
+    coordinator.async_request_refresh = AsyncMock()  # type: ignore[method-assign]
+    await coordinator.async_set_lyric_offset(250)
+    assert coordinator.data.lyric_offset_ms == 250
+    assert entry.options[CONF_LYRIC_OFFSET_MS] == 250
+    await coordinator.async_shutdown()
+    await hass.async_stop()
+
+
+@pytest.mark.asyncio
 async def test_options_schema_includes_cast_fields() -> None:
     pytest.importorskip("homeassistant")
     import pytest as _pytest

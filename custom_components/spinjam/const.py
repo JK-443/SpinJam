@@ -80,3 +80,8 @@ LYRICS_CACHE_SIZE = 64
 SELECT_DISPLAY_ENTITY_ID = "select.spinjam_display"
 SWITCH_CAST_ENTITY_ID = "switch.spinjam_cast"
 SWITCH_TRACKING_ENTITY_ID = "switch.spinjam_tracking"
+NUMBER_LYRIC_OFFSET_ENTITY_ID = "number.spinjam_lyric_offset"
+
+# lyric_lines attribute: hard cap; window keeps context around the current line.
+LYRIC_LINES_ATTR_MAX = 120
+LYRIC_LINES_WINDOW_BEFORE = 40

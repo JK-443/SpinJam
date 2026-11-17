@@ -17,9 +17,18 @@ _LOGGER = logging.getLogger(__name__)
 # HA Lovelace url_path: slug with at least one hyphen (Settings → Dashboards).
 _URL_PATH_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)+$")
 
-SPINJAM_CARD = {
-    "type": "custom:spinjam-now-playing-card",
+DETAILS_CARD = {
+    "type": "custom:spinjam-lyrics-card",
     "entity": "media_player.spinjam_now_playing",
+    "mode": "details",
+    "offset_entity": "number.spinjam_lyric_offset",
+}
+
+LYRICS_CARD = {
+    "type": "custom:spinjam-lyrics-card",
+    "entity": "media_player.spinjam_now_playing",
+    "mode": "lyrics",
+    "offset_entity": "number.spinjam_lyric_offset",
 }
 
 
@@ -50,6 +59,21 @@ def dashboard_exists(hass: HomeAssistant, url_path: str) -> bool:
     return url_path in dashboards
 
 
+def spinjam_tv_view_config(view_path: str) -> dict[str, Any]:
+    """Panel view: details (left) + lyrics (right) via horizontal-stack."""
+    return {
+        "title": "Now",
+        "path": view_path,
+        "type": "panel",
+        "cards": [
+            {
+                "type": "horizontal-stack",
+                "cards": [dict(DETAILS_CARD), dict(LYRICS_CARD)],
+            }
+        ],
+    }
+
+
 async def async_create_spinjam_dashboard(
     hass: HomeAssistant,
     *,
@@ -61,6 +85,7 @@ async def async_create_spinjam_dashboard(
 
     Uses Lovelace's ``DashboardsCollection`` the same way HA creates the map
     dashboard. Safe to call repeatedly: existing dashboards are updated in place.
+    Layout: details card left, lyrics card right.
     """
     path = validate_dashboard_url_path(dashboard_path or DEFAULT_DASHBOARD_PATH)
     view = (view_path or DEFAULT_VIEW_PATH).strip() or DEFAULT_VIEW_PATH
@@ -93,16 +118,7 @@ async def async_create_spinjam_dashboard(
     if store is None:
         raise HomeAssistantError(f"Dashboard {path} was not registered after create")
 
-    config = {
-        "views": [
-            {
-                "title": "Now",
-                "path": view,
-                "type": "panel",
-                "cards": [dict(SPINJAM_CARD)],
-            }
-        ]
-    }
+    config = {"views": [spinjam_tv_view_config(view)]}
     try:
         await store.async_save(config)
     except Exception as err:  # noqa: BLE001

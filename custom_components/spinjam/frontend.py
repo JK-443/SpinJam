@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from pathlib import Path
 
@@ -12,37 +13,52 @@ from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 WWW_DIR = Path(__file__).parent / "www"
-CARD_FILENAME = "spinjam-now-playing-card.js"
-STATIC_URL_PATH = f"/{DOMAIN}/{CARD_FILENAME}"
+CARD_FILENAME = "spinjam-lyrics-card.js"
 
 
-async def async_setup_frontend(hass: HomeAssistant) -> None:
+def card_file_hash() -> str:
+    """Return a short content hash for cache-busting Cast / browser loads."""
+    path = WWW_DIR / CARD_FILENAME
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    return digest[:12]
+
+
+def card_resource_url() -> str:
+    """Lovelace module URL including ``?v=<hash>``."""
+    return f"/{DOMAIN}/{CARD_FILENAME}?v={card_file_hash()}"
+
+
+async def async_setup_frontend(hass: HomeAssistant) -> str | None:
     """Register static path + Lovelace module resource (once).
 
     Soft-fails when ``http`` / ``frontend`` are not fully available (unit tests).
-    HACS users get the card automatically — no separate frontend install.
+    Returns the versioned resource URL when registration succeeds.
     """
     key = f"{DOMAIN}_frontend"
     if hass.data.get(key):
-        return
+        return hass.data.get(f"{DOMAIN}_card_url")
 
     if not hasattr(hass, "http") or hass.http is None:
         _LOGGER.debug("HTTP not ready; skipping SpinJam frontend registration")
-        return
+        return None
 
     registered = await _async_register_static(hass)
     if not registered:
-        return
+        return None
 
+    url = card_resource_url()
     try:
         from homeassistant.components.frontend import add_extra_js_url
 
-        add_extra_js_url(hass, STATIC_URL_PATH)
+        add_extra_js_url(hass, url)
     except Exception as err:  # noqa: BLE001
         _LOGGER.debug("add_extra_js_url skipped: %s", err)
 
     hass.data[key] = True
-    _LOGGER.debug("Registered SpinJam frontend at %s", STATIC_URL_PATH)
+    hass.data[f"{DOMAIN}_card_url"] = url
+    hass.data[f"{DOMAIN}_card_version"] = card_file_hash()
+    _LOGGER.debug("Registered SpinJam frontend at %s", url)
+    return url
 
 
 async def _async_register_static(hass: HomeAssistant) -> bool:

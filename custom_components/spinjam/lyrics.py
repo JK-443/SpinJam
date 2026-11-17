@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from dataclasses import dataclass
 import logging
 import re
-from dataclasses import dataclass
 from typing import Any
 
 from aiohttp import ClientError, ClientSession
@@ -14,13 +14,22 @@ from .const import LRCLIB_API, LYRICS_CACHE_SIZE
 
 _LOGGER = logging.getLogger(__name__)
 
-_LRC_LINE = re.compile(r"\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\](.*)")
+# One or more [mm:ss.xx] stamps, then the rest of the line (may include <mm:ss> words).
+_LRC_STAMP = re.compile(r"\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]")
+_WORD_TAG = re.compile(r"<(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?>")
+
+
+@dataclass(frozen=True)
+class LyricWord:
+    start: float
+    text: str
 
 
 @dataclass(frozen=True)
 class LyricLine:
     start: float
     text: str
+    words: tuple[LyricWord, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -30,23 +39,56 @@ class LyricsResult:
     source: str = "lrclib"
 
 
+def _stamp_to_seconds(minutes: str, seconds: str, frac: str | None) -> float:
+    frac_n = ((frac or "0") + "000")[:3]
+    return int(minutes) * 60 + int(seconds) + int(frac_n) / 1000.0
+
+
+def parse_word_tags(text: str) -> tuple[str, tuple[LyricWord, ...]]:
+    """Parse LRCLIB enhanced ``<mm:ss.xx>`` word tags; return (plain_text, words)."""
+    words: list[LyricWord] = []
+    last = 0
+    last_t: float | None = None
+    for match in _WORD_TAG.finditer(text):
+        if last_t is not None:
+            chunk = text[last : match.start()]
+            if chunk.strip():
+                words.append(LyricWord(start=last_t, text=chunk))
+        last_t = _stamp_to_seconds(match.group(1), match.group(2), match.group(3))
+        last = match.end()
+    if last_t is not None:
+        chunk = text[last:]
+        if chunk.strip():
+            words.append(LyricWord(start=last_t, text=chunk))
+    plain = _WORD_TAG.sub("", text)
+    plain = re.sub(r"\s+", " ", plain).strip()
+    return plain, tuple(words)
+
+
 def parse_lrc(synced: str | None) -> tuple[LyricLine, ...]:
+    """Parse LRC text.
+
+    Lines with several timestamps (``[00:12][00:40]text``) yield one entry per
+    stamp, sharing the same text / word tags, sorted by start time.
+    """
     if not synced:
         return ()
     lines: list[LyricLine] = []
     for raw in synced.splitlines():
-        match = _LRC_LINE.match(raw.strip())
-        if not match:
+        stripped = raw.strip()
+        if not stripped:
             continue
-        minutes = int(match.group(1))
-        seconds = int(match.group(2))
-        frac = match.group(3) or "0"
-        # Normalize fractional seconds (1–3 digits)
-        frac = (frac + "000")[:3]
-        start = minutes * 60 + seconds + int(frac) / 1000.0
-        text = match.group(4).strip()
-        if text:
-            lines.append(LyricLine(start=start, text=text))
+        stamps = list(_LRC_STAMP.finditer(stripped))
+        if not stamps:
+            continue
+        text = stripped[stamps[-1].end() :].strip()
+        if not text:
+            continue
+        plain, words = parse_word_tags(text)
+        display = plain or text
+        for stamp in stamps:
+            start = _stamp_to_seconds(stamp.group(1), stamp.group(2), stamp.group(3))
+            lines.append(LyricLine(start=start, text=display, words=words))
     lines.sort(key=lambda line: line.start)
     return tuple(lines)
 
@@ -66,6 +108,41 @@ def line_at(lines: tuple[LyricLine, ...], position: float) -> tuple[str | None, 
                 nxt = line.text
             break
     return current, nxt
+
+
+def lines_payload(
+    lines: tuple[LyricLine, ...],
+    *,
+    position: float | None = None,
+    max_lines: int = 120,
+    before: int = 40,
+) -> list[dict[str, Any]] | None:
+    """Serialize lyric lines for state attributes (capped / windowed)."""
+    if not lines:
+        return None
+    indexed = list(enumerate(lines))
+    if len(indexed) > max_lines:
+        cur = 0
+        if position is not None:
+            for i, line in enumerate(lines):
+                if line.start <= position:
+                    cur = i
+                else:
+                    break
+        start = max(0, cur - before)
+        end = min(len(lines), start + max_lines)
+        start = max(0, end - max_lines)
+        indexed = indexed[start:end]
+
+    payload: list[dict[str, Any]] = []
+    for _, line in indexed:
+        item: dict[str, Any] = {"t": round(line.start, 3), "text": line.text}
+        if line.words:
+            item["words"] = [
+                {"t": round(word.start, 3), "text": word.text} for word in line.words
+            ]
+        payload.append(item)
+    return payload
 
 
 class LyricsCache:
@@ -137,6 +214,8 @@ class LrcLibClient:
         if data.get("instrumental"):
             result = LyricsResult(lines=(), instrumental=True)
         else:
-            result = LyricsResult(lines=parse_lrc(data.get("syncedLyrics")))
+            # Prefer enhancedLyrics when LRCLIB provides word tags; else syncedLyrics.
+            synced = data.get("enhancedLyrics") or data.get("syncedLyrics")
+            result = LyricsResult(lines=parse_lrc(synced))
         self.cache.set(cache_key, result)
         return result

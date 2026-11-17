@@ -38,7 +38,7 @@ When a configured Sonos/Port player’s source is **Line-in**, SpinJam uses the 
 6. Optionally select **Displays** (Google Cast targets), e.g. `media_player.example_tv`
 7. Enable lyrics; leave sync / lyric offsets at `0` until you calibrate
 
-The TV card ships with the integration (`/spinjam/spinjam-now-playing-card.js`) — no separate frontend install.
+The TV card ships with the integration (`/spinjam/spinjam-lyrics-card.js?v=…`, modes `details` / `lyrics`) — no separate frontend install. `spinjam-now-playing-card` remains a deprecated alias.
 
 ### Option B — Manual
 
@@ -66,8 +66,8 @@ Options: **Built-in casting** (default on) — when off, start/stop and the Cast
 2. Open Developer Tools → States → `media_player.spinjam_now_playing`.  
 3. Confirm artist/title/album/art; with lyrics enabled, check `lyric_current` / `lyric_next` / `lyric_lines`.  
 4. Services: `spinjam.identify`, `spinjam.set_sync_offset`, `spinjam.select_album`, `spinjam.clear_lock`, `spinjam.start`, `spinjam.stop`.
-5. Entities: `select.spinjam_display`, `switch.spinjam_cast`, `switch.spinjam_tracking`.
-6. Attributes include `displays`, `selected_display`, `lyric_offset_ms`, `tracking_enabled`, `cast_active`.
+5. Entities: `select.spinjam_display`, `switch.spinjam_cast`, `switch.spinjam_tracking`, `number.spinjam_lyric_offset`.
+6. Attributes include `displays`, `selected_display`, `lyric_offset_ms`, `lyric_lines` (optional `words`), `tracking_enabled`, `cast_active`.
 
 ## Vinyl capture node (optional source)
 
