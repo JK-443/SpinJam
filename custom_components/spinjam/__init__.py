@@ -156,6 +156,8 @@ def _async_register_services(hass: HomeAssistant) -> None:
             await coordinator.async_stop()
 
     async def handle_create_dashboard(call: ServiceCall) -> None:
+        from homeassistant.exceptions import ServiceValidationError
+
         coordinator = await _coord()
         opts: dict[str, Any] = {}
         if coordinator is not None:
@@ -166,6 +168,10 @@ def _async_register_services(hass: HomeAssistant) -> None:
         view = call.data.get(CONF_VIEW_PATH) or opts.get(
             CONF_VIEW_PATH, DEFAULT_VIEW_PATH
         )
+        try:
+            path = validate_dashboard_url_path(path)
+        except vol.Invalid as err:
+            raise ServiceValidationError(str(err)) from err
         result = await async_create_spinjam_dashboard(
             hass, dashboard_path=path, view_path=view
         )
@@ -218,7 +224,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
         handle_create_dashboard,
         schema=vol.Schema(
             {
-                vol.Optional(CONF_DASHBOARD_PATH): validate_dashboard_url_path,
+                vol.Optional(CONF_DASHBOARD_PATH): cv.string,
                 vol.Optional(CONF_VIEW_PATH): cv.string,
             }
         ),

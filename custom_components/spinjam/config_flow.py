@@ -93,6 +93,38 @@ def displays_selector() -> selector.EntitySelector:
     return selector.EntitySelector(selector.EntitySelectorConfig(**kwargs))
 
 
+def _text_selector() -> selector.TextSelector:
+    return selector.TextSelector(selector.TextSelectorConfig())
+
+
+def _boolean_selector() -> selector.BooleanSelector:
+    return selector.BooleanSelector(selector.BooleanSelectorConfig())
+
+
+def _ms_offset_selector(minimum: int, maximum: int) -> selector.NumberSelector:
+    return selector.NumberSelector(
+        selector.NumberSelectorConfig(
+            min=minimum,
+            max=maximum,
+            step=1,
+            mode=selector.NumberSelectorMode.BOX,
+            unit_of_measurement="ms",
+        )
+    )
+
+
+def _seconds_selector(minimum: float, maximum: float) -> selector.NumberSelector:
+    return selector.NumberSelector(
+        selector.NumberSelectorConfig(
+            min=minimum,
+            max=maximum,
+            step=1,
+            mode=selector.NumberSelectorMode.BOX,
+            unit_of_measurement="s",
+        )
+    )
+
+
 def _add_optional_single_media_player(
     fields: dict[Any, Any], key: str, default: str | None
 ) -> None:
@@ -106,6 +138,12 @@ def _add_optional_single_media_player(
 
 
 def _schema(defaults: dict[str, Any] | None = None, *, options: bool = False) -> vol.Schema:
+    """Build a config/options schema using only HA-serializable selectors / types.
+
+    Custom validators (dashboard path, cast displays, offset bounds) run in the
+    step handlers — never as schema callables — so ``data_entry_flow`` can
+    serialize the form.
+    """
     defaults = defaults or {}
     fields: dict[Any, Any] = {
         vol.Required(CONF_NAME, default=defaults.get(CONF_NAME, DEFAULT_NAME)): str,
@@ -120,15 +158,15 @@ def _schema(defaults: dict[str, Any] | None = None, *, options: bool = False) ->
         vol.Required(
             CONF_LYRICS_ENABLED,
             default=defaults.get(CONF_LYRICS_ENABLED, DEFAULT_LYRICS_ENABLED),
-        ): bool,
+        ): _boolean_selector(),
         vol.Required(
             CONF_SYNC_OFFSET_MS,
             default=defaults.get(CONF_SYNC_OFFSET_MS, DEFAULT_SYNC_OFFSET_MS),
-        ): vol.All(vol.Coerce(int), vol.Range(min=-2000, max=2000)),
+        ): _ms_offset_selector(-2000, 2000),
         vol.Required(
             CONF_LYRIC_OFFSET_MS,
             default=defaults.get(CONF_LYRIC_OFFSET_MS, DEFAULT_LYRIC_OFFSET_MS),
-        ): vol.All(vol.Coerce(int), vol.Range(min=-5000, max=5000)),
+        ): _ms_offset_selector(-5000, 5000),
     }
     _add_optional_single_media_player(
         fields, CONF_VINYL_PLAYER, defaults.get(CONF_VINYL_PLAYER)
@@ -137,29 +175,29 @@ def _schema(defaults: dict[str, Any] | None = None, *, options: bool = False) ->
         fields[vol.Required(
             CONF_BUILTIN_CASTING,
             default=defaults.get(CONF_BUILTIN_CASTING, DEFAULT_BUILTIN_CASTING),
-        )] = bool
+        )] = _boolean_selector()
         fields[vol.Required(
             CONF_DASHBOARD_PATH,
             default=defaults.get(CONF_DASHBOARD_PATH, DEFAULT_DASHBOARD_PATH),
-        )] = validate_dashboard_url_path
+        )] = _text_selector()
         fields[vol.Required(
             CONF_VIEW_PATH,
             default=defaults.get(CONF_VIEW_PATH, DEFAULT_VIEW_PATH),
-        )] = str
+        )] = _text_selector()
         fields[vol.Required(
             CONF_RECAST_WHILE_PLAYING,
             default=defaults.get(
                 CONF_RECAST_WHILE_PLAYING, DEFAULT_RECAST_WHILE_PLAYING
             ),
-        )] = bool
+        )] = _boolean_selector()
         fields[vol.Required(
             CONF_RECAST_INTERVAL,
             default=defaults.get(CONF_RECAST_INTERVAL, DEFAULT_RECAST_INTERVAL),
-        )] = vol.All(vol.Coerce(float), vol.Range(min=15, max=300))
+        )] = _seconds_selector(15, 300)
         fields[vol.Required(
             CONF_RECAST_ON_STARTUP,
             default=defaults.get(CONF_RECAST_ON_STARTUP, DEFAULT_RECAST_ON_STARTUP),
-        )] = bool
+        )] = _boolean_selector()
     return vol.Schema(fields)
 
 
@@ -168,6 +206,61 @@ def _normalize_displays(user_input: dict[str, Any]) -> list[str]:
     if isinstance(displays, str):
         displays = [displays]
     return list(displays)
+
+
+def _coerce_int(value: Any) -> int | None:
+    try:
+        return int(round(float(value)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _validate_flow_input(
+    user_input: dict[str, Any], *, options: bool
+) -> dict[str, str]:
+    """Validate offsets / dashboard path in the handler; return field→error keys."""
+    errors: dict[str, str] = {}
+
+    sync = _coerce_int(user_input.get(CONF_SYNC_OFFSET_MS))
+    if sync is None or not -2000 <= sync <= 2000:
+        errors[CONF_SYNC_OFFSET_MS] = "invalid_sync_offset"
+    else:
+        user_input[CONF_SYNC_OFFSET_MS] = sync
+
+    lyric = _coerce_int(user_input.get(CONF_LYRIC_OFFSET_MS))
+    if lyric is None or not -5000 <= lyric <= 5000:
+        errors[CONF_LYRIC_OFFSET_MS] = "invalid_lyric_offset"
+    else:
+        user_input[CONF_LYRIC_OFFSET_MS] = lyric
+
+    if options:
+        try:
+            user_input[CONF_DASHBOARD_PATH] = validate_dashboard_url_path(
+                user_input.get(CONF_DASHBOARD_PATH)
+            )
+        except vol.Invalid:
+            errors[CONF_DASHBOARD_PATH] = "invalid_path"
+
+        view = user_input.get(CONF_VIEW_PATH)
+        if view is None or not str(view).strip():
+            errors[CONF_VIEW_PATH] = "invalid_view_path"
+        else:
+            user_input[CONF_VIEW_PATH] = str(view).strip()
+
+        interval = _coerce_float(user_input.get(CONF_RECAST_INTERVAL))
+        if interval is None or not 15 <= interval <= 300:
+            errors[CONF_RECAST_INTERVAL] = "invalid_recast_interval"
+        else:
+            user_input[CONF_RECAST_INTERVAL] = interval
+
+    return errors
 
 
 async def _async_validate_cast_displays(
@@ -193,20 +286,22 @@ class SpinJamConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             sources = user_input.get(CONF_SOURCE_PLAYERS) or []
             if not sources:
-                errors["base"] = "no_sources"
+                errors[CONF_SOURCE_PLAYERS] = "no_sources"
             else:
                 displays = _normalize_displays(user_input)
                 user_input[CONF_DISPLAYS] = displays
-                cast_error = await _async_validate_cast_displays(self.hass, displays)
-                if cast_error:
-                    errors["base"] = cast_error
-                else:
-                    await self.async_set_unique_id(DOMAIN)
-                    self._abort_if_unique_id_configured()
-                    return self.async_create_entry(
-                        title=user_input.get(CONF_NAME, DEFAULT_NAME),
-                        data=user_input,
-                    )
+                errors.update(_validate_flow_input(user_input, options=False))
+                if not errors:
+                    cast_error = await _async_validate_cast_displays(self.hass, displays)
+                    if cast_error:
+                        errors[CONF_DISPLAYS] = cast_error
+                    else:
+                        await self.async_set_unique_id(DOMAIN)
+                        self._abort_if_unique_id_configured()
+                        return self.async_create_entry(
+                            title=user_input.get(CONF_NAME, DEFAULT_NAME),
+                            data=user_input,
+                        )
 
         return self.async_show_form(step_id="user", data_schema=_schema(), errors=errors)
 
@@ -226,16 +321,15 @@ class SpinJamOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             displays = _normalize_displays(user_input)
             user_input[CONF_DISPLAYS] = displays
-            cast_error = await _async_validate_cast_displays(self.hass, displays)
-            if cast_error:
-                errors["base"] = cast_error
+            sources = user_input.get(CONF_SOURCE_PLAYERS) or []
+            if not sources:
+                errors[CONF_SOURCE_PLAYERS] = "no_sources"
             else:
-                try:
-                    user_input[CONF_DASHBOARD_PATH] = validate_dashboard_url_path(
-                        user_input.get(CONF_DASHBOARD_PATH)
-                    )
-                except vol.Invalid:
-                    errors["base"] = "invalid_dashboard_path"
+                errors.update(_validate_flow_input(user_input, options=True))
+            if not errors:
+                cast_error = await _async_validate_cast_displays(self.hass, displays)
+                if cast_error:
+                    errors[CONF_DISPLAYS] = cast_error
                 else:
                     return self.async_create_entry(title="", data=user_input)
 

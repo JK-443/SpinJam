@@ -15,17 +15,41 @@ _LOGGER = logging.getLogger(__name__)
 WWW_DIR = Path(__file__).parent / "www"
 CARD_FILENAME = "spinjam-lyrics-card.js"
 
+# Populated once via executor (or sync fallback in unit tests).
+_card_hash: str | None = None
 
-def card_file_hash() -> str:
-    """Return a short content hash for cache-busting Cast / browser loads."""
+
+def _compute_card_file_hash() -> str:
+    """Read card bytes and return a short sha256 (blocking — run in executor)."""
     path = WWW_DIR / CARD_FILENAME
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     return digest[:12]
 
 
-def card_resource_url() -> str:
+def card_file_hash() -> str:
+    """Return the cached card content hash.
+
+    Prefer ``async_get_card_file_hash`` on the event loop so the first read runs
+    in an executor. Sync fallback exists for unit tests that never set up the
+    frontend.
+    """
+    global _card_hash
+    if _card_hash is None:
+        _card_hash = _compute_card_file_hash()
+    return _card_hash
+
+
+async def async_get_card_file_hash(hass: HomeAssistant) -> str:
+    """Compute (once) and cache the card hash off the event loop."""
+    global _card_hash
+    if _card_hash is None:
+        _card_hash = await hass.async_add_executor_job(_compute_card_file_hash)
+    return _card_hash
+
+
+def card_resource_url(version: str | None = None) -> str:
     """Lovelace module URL including ``?v=<hash>``."""
-    return f"/{DOMAIN}/{CARD_FILENAME}?v={card_file_hash()}"
+    return f"/{DOMAIN}/{CARD_FILENAME}?v={version or card_file_hash()}"
 
 
 async def async_setup_frontend(hass: HomeAssistant) -> str | None:
@@ -46,7 +70,8 @@ async def async_setup_frontend(hass: HomeAssistant) -> str | None:
     if not registered:
         return None
 
-    url = card_resource_url()
+    version = await async_get_card_file_hash(hass)
+    url = card_resource_url(version)
     try:
         from homeassistant.components.frontend import add_extra_js_url
 
@@ -56,7 +81,7 @@ async def async_setup_frontend(hass: HomeAssistant) -> str | None:
 
     hass.data[key] = True
     hass.data[f"{DOMAIN}_card_url"] = url
-    hass.data[f"{DOMAIN}_card_version"] = card_file_hash()
+    hass.data[f"{DOMAIN}_card_version"] = version
     _LOGGER.debug("Registered SpinJam frontend at %s", url)
     return url
 
