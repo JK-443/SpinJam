@@ -17,16 +17,21 @@ CONF_DASHBOARD_PATH = "dashboard_path"
 CONF_VIEW_PATH = "view_path"
 CONF_RECAST_WHILE_PLAYING = "recast_while_playing"
 CONF_RECAST_INTERVAL = "recast_interval"
+CONF_BUILTIN_CASTING = "builtin_casting"
+CONF_RECAST_ON_STARTUP = "recast_on_startup"
 
 DEFAULT_NAME = "SpinJam Now Playing"
 DEFAULT_SYNC_OFFSET_MS = 0
 DEFAULT_LYRIC_OFFSET_MS = 0
 DEFAULT_LYRICS_ENABLED = True
 DEFAULT_UPDATE_INTERVAL = 1.0
-DEFAULT_DASHBOARD_PATH = "spinjam"
+DEFAULT_DASHBOARD_PATH = "spinjam-tv"
 DEFAULT_VIEW_PATH = "now"
+LEGACY_DASHBOARD_PATH = "spinjam"
 DEFAULT_RECAST_WHILE_PLAYING = True
 DEFAULT_RECAST_INTERVAL = 45.0
+DEFAULT_BUILTIN_CASTING = True
+DEFAULT_RECAST_ON_STARTUP = False
 
 ATTR_LYRIC_CURRENT = "lyric_current"
 ATTR_LYRIC_NEXT = "lyric_next"
@@ -45,6 +50,7 @@ SERVICE_SELECT_ALBUM = "select_album"
 SERVICE_CLEAR_LOCK = "clear_lock"
 SERVICE_START = "start"
 SERVICE_STOP = "stop"
+SERVICE_CREATE_DASHBOARD = "create_dashboard"
 
 EVENT_SPINJAM_START = "spinjam_start"
 EVENT_SPINJAM_STOP = "spinjam_stop"
@@ -72,3 +78,10 @@ LRCLIB_API = "https://lrclib.net/api/get"
 LYRICS_CACHE_SIZE = 64
 
 SELECT_DISPLAY_ENTITY_ID = "select.spinjam_display"
+SWITCH_CAST_ENTITY_ID = "switch.spinjam_cast"
+SWITCH_TRACKING_ENTITY_ID = "switch.spinjam_tracking"
+NUMBER_LYRIC_OFFSET_ENTITY_ID = "number.spinjam_lyric_offset"
+
+# lyric_lines attribute: hard cap; window keeps context around the current line.
+LYRIC_LINES_ATTR_MAX = 120
+LYRIC_LINES_WINDOW_BEFORE = 40

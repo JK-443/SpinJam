@@ -35,10 +35,10 @@ When a configured Sonos/Port player’s source is **Line-in**, SpinJam uses the 
    - `media_player.turntable` (Music Assistant)
    - Sonos rooms (`media_player.living_room`, `media_player.kitchen`, …)
    - Optional vinyl: `media_player.spinjam_turntable` (after the capture node is up)
-6. Optionally select **Displays** (Cast / Google TV targets), e.g. `media_player.living_room_tv`
+6. Optionally select **Displays** (Google Cast targets), e.g. `media_player.example_tv`
 7. Enable lyrics; leave sync / lyric offsets at `0` until you calibrate
 
-The TV card ships with the integration (`/spinjam/spinjam-now-playing-card.js`) — no separate frontend install.
+The TV card ships with the integration (`/spinjam/spinjam-lyrics-card.js?v=…`, modes `details` / `lyrics`) — no separate frontend install. `spinjam-now-playing-card` remains a deprecated alias.
 
 ### Option B — Manual
 
@@ -47,9 +47,18 @@ Copy `custom_components/spinjam` into your HA `config/custom_components/spinjam`
 ### Cast the now-playing view (one-time)
 
 1. Ensure **Google Cast** is set up and HA has an HTTPS **External URL**.  
-2. Create a Lovelace dashboard path `spinjam` with a panel view path `now` using `custom:spinjam-now-playing-card` (full steps: [`docs/TV_CAST.md`](docs/TV_CAST.md)).  
-3. Configure SpinJam options: displays + dashboard/view paths (defaults match above).  
-4. Call `spinjam.start` / `spinjam.stop` (or automate on Port Line-in).
+2. Call `spinjam.create_dashboard` (or manually create Lovelace path `spinjam-tv` with panel view `now` — HA requires a hyphen in the path). Full steps: [`docs/TV_CAST.md`](docs/TV_CAST.md).  
+3. Configure SpinJam options: Cast displays + dashboard/view paths (defaults `spinjam-tv` / `now`).  
+4. Use `switch.spinjam_cast`, or `spinjam.start` / `spinjam.stop` (or automate on Port Line-in).
+
+### Switches
+
+| Entity | Role |
+| --- | --- |
+| `switch.spinjam_cast` | On = `spinjam.start` (selected `select.spinjam_display`); off = `spinjam.stop`. Tracks whether a SpinJam cast session is active. |
+| `switch.spinjam_tracking` | On (default) follows sources / polls; off **holds** the last now-playing snapshot (no polling). Leaving tracking off does **not** stop Cast. |
+
+Options: **Built-in casting** (default on) — when off, start/stop and the Cast switch only fire `spinjam_start` / `spinjam_stop` so you can cast from your own automations without double-casting. **Recast on startup** (default off) — only then will a previously-on Cast switch re-cast after an HA restart.
 
 ### Try it
 
@@ -57,7 +66,8 @@ Copy `custom_components/spinjam` into your HA `config/custom_components/spinjam`
 2. Open Developer Tools → States → `media_player.spinjam_now_playing`.  
 3. Confirm artist/title/album/art; with lyrics enabled, check `lyric_current` / `lyric_next` / `lyric_lines`.  
 4. Services: `spinjam.identify`, `spinjam.set_sync_offset`, `spinjam.select_album`, `spinjam.clear_lock`, `spinjam.start`, `spinjam.stop`.
-5. Attributes include `displays`, `selected_display`, `lyric_offset_ms`.
+5. Entities: `select.spinjam_display`, `switch.spinjam_cast`, `switch.spinjam_tracking`, `number.spinjam_lyric_offset`.
+6. Attributes include `displays`, `selected_display`, `lyric_offset_ms`, `lyric_lines` (optional `words`), `tracking_enabled`, `cast_active`.
 
 ## Vinyl capture node (optional source)
 

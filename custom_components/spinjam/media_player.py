@@ -118,6 +118,8 @@ class SpinJamMediaPlayer(CoordinatorEntity[SpinJamCoordinator], MediaPlayerEntit
             ATTR_ALBUM_LOCK: data.album_lock,
             ATTR_DISPLAYS: list(self.coordinator.displays),
             ATTR_SELECTED_DISPLAY: self.coordinator.selected_display,
+            "tracking_enabled": self.coordinator.tracking_enabled,
+            "cast_active": self.coordinator.cast_active,
         }
         if active:
             attrs[ATTR_ACTIVE_SOURCE] = active.entity_id

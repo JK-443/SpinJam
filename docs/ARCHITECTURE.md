@@ -8,7 +8,7 @@ SpinJam is a **general now-playing system**. Vinyl is one source among Music Ass
 | --- | --- | --- |
 | `custom_components/spinjam` | Home Assistant (HACS) | Brain: pick active source, unify metadata, LRCLIB lyrics, services, Cast |
 | `spinjam/` Python service | Capture Pi (Zero 2 W / Pi 4) | Vinyl audio capture + Shazam/(optional ACR/AudD) → MQTT media_player |
-| Lovelace card + Cast | HA → TV Cast targets | `spinjam-now-playing-card` + `cast.show_lovelace_view` on `spinjam.start` |
+| Lovelace card + Cast | HA → TV Cast targets | `spinjam-lyrics-card` (details + lyrics) + `cast.show_lovelace_view` on `spinjam.start` |
 
 ## Source rules
 
@@ -20,13 +20,16 @@ SpinJam is a **general now-playing system**. Vinyl is one source among Music Ass
 
 ## Displays + Cast
 
-1. Config/options `displays` is an optional ordered list of `media_player` entities (e.g. `media_player.living_room_tv`).
+1. Config/options `displays` is an optional ordered list of Google Cast `media_player` entities (e.g. `media_player.example_tv`).
 2. `select.spinjam_display` exposes those options; default is the first; last choice is restored after restart.
-3. `spinjam.start` (optional `display`) validates against the list, updates the select, calls `cast.show_lovelace_view` with configurable `dashboard_path` / `view_path` (defaults `spinjam` / `now`), and fires `spinjam_start`.
-4. Optional re-cast while playing recovers dropped Cast sessions.
-5. `spinjam.stop` ends Cast via `media_player.turn_off` and fires `spinjam_stop`.
-6. Legacy single `display_entity` config is migrated into a one-item `displays` list when present.
-7. The Lovelace dashboard/view is a **one-time manual setup** (integrations cannot reliably create dashboards in all HA modes). Card JS is served from the integration static path.
+3. `spinjam.start` / `switch.spinjam_cast` on (optional `display`) validates against the list, updates the select, and fires `spinjam_start`. When **built-in casting** is on (default), also calls `cast.show_lovelace_view` with configurable `dashboard_path` / `view_path` (defaults `spinjam-tv` / `now`; path must include a hyphen). Non-cast platforms are skipped with a warning.
+4. Optional re-cast while playing recovers dropped Cast sessions; optional **recast on startup** (default off) re-starts Cast after HA restart if the Cast switch was on.
+5. Cast receivers cache Lovelace resources once per session. SpinJam tracks the card JS hash last cast per display; when it changes, `spinjam.start` quits the Cast app (`media_player.turn_off`) before `cast.show_lovelace_view` so the new card loads.
+6. `spinjam.stop` / Cast switch off ends Cast via `media_player.turn_off` when built-in casting is on, and always fires `spinjam_stop`. External Cast end (display off/unavailable) clears the logical session and the Cast switch.
+7. `switch.spinjam_tracking` (default on, RestoreEntity): off pauses source watchers and the ~1 s poll; now-playing **holds** the last snapshot. Tracking off does not stop Cast.
+8. `number.spinjam_lyric_offset` (ms, positive = lyrics later, RestoreEntity) nudges lyric highlighting live; the TV card defaults `offset_entity` to it.
+9. Legacy single `display_entity` config is migrated into a one-item `displays` list when present.
+10. Prefer `spinjam.create_dashboard` (panel: details left, lyrics right). Card JS is auto-registered at `/spinjam/spinjam-lyrics-card.js?v=<hash>`; `spinjam-now-playing-card` remains a deprecated alias.
 
 ## Memory constraints
 
@@ -36,4 +39,4 @@ HA runs on a Pi 4 that is (or was) memory-starved. The integration must stay lig
 - `aiohttp` via Home Assistant’s shared session only
 - Small in-memory LRU for lyrics (and art URLs are passed through, not downloaded)
 - Event-driven updates + a low-frequency lyric tick while playing
-- Vanilla JS TV card (no Lit); `lyric_lines` attribute capped for state size
+- Vanilla JS TV card (no Lit); `lyric_lines` capped (~120) and windowed around the current position; optional per-line `words` from LRCLIB enhanced tags

@@ -7,11 +7,11 @@
         "data": {
           "name": "Name",
           "source_players": "Source media players",
-          "displays": "Display media players (optional)",
+          "displays": "Cast display media players (optional)",
           "vinyl_player": "Vinyl MQTT media player",
           "lyrics_enabled": "Fetch LRCLIB synced lyrics",
           "sync_offset_ms": "Playback sync offset (ms)",
-          "lyric_offset_ms": "Lyric display offset (ms)"
+          "lyric_offset_ms": "Lyric display offset (ms; positive = lyrics later)"
         }
       }
     },
@@ -19,26 +19,30 @@
       "single_instance_allowed": "Only one SpinJam instance is allowed."
     },
     "error": {
-      "no_sources": "Select at least one source media player."
+      "no_sources": "Select at least one source media player.",
+      "displays_not_cast": "Every display must be a Google Cast media_player (entity registry platform = cast).",
+      "invalid_dashboard_path": "Dashboard path must be a lowercase slug that contains a hyphen (e.g. spinjam-tv)."
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "SpinJam options",
-        "description": "Update sources, displays, lyric timing, and Cast dashboard paths. Defaults: dashboard_path=spinjam, view_path=now. Create that Lovelace dashboard once (see docs/TV_CAST.md).",
+        "description": "Update sources, displays, lyric timing, and Cast options. Defaults: dashboard_path=spinjam-tv, view_path=now. Prefer Google Cast media_players. Call spinjam.create_dashboard once or create the dashboard manually (see docs/TV_CAST.md).",
         "data": {
           "name": "Name",
           "source_players": "Source media players",
-          "displays": "Display media players (optional)",
+          "displays": "Cast display media players (optional)",
           "vinyl_player": "Vinyl MQTT media player",
           "lyrics_enabled": "Fetch LRCLIB synced lyrics",
           "sync_offset_ms": "Playback sync offset (ms)",
-          "lyric_offset_ms": "Lyric display offset (ms)",
-          "dashboard_path": "Cast dashboard path",
+          "lyric_offset_ms": "Lyric display offset (ms; positive = lyrics later)",
+          "builtin_casting": "Built-in casting (cast.show_lovelace_view)",
+          "dashboard_path": "Cast dashboard path (must include a hyphen)",
           "view_path": "Cast view path",
           "recast_while_playing": "Re-cast while playing (session drop recovery)",
-          "recast_interval": "Re-cast interval (seconds)"
+          "recast_interval": "Re-cast interval (seconds)",
+          "recast_on_startup": "Re-cast on Home Assistant restart if Cast was on"
         }
       }
     }
@@ -46,7 +50,7 @@
   "services": {
     "start": {
       "name": "Start SpinJam display",
-      "description": "Cast the SpinJam now-playing Lovelace view to a configured display and fire spinjam_start.",
+      "description": "Start a SpinJam display session (optional built-in Cast) and fire spinjam_start. Same as turning on switch.spinjam_cast.",
       "fields": {
         "display": {
           "name": "Display",
@@ -56,7 +60,21 @@
     },
     "stop": {
       "name": "Stop SpinJam display",
-      "description": "End the Cast session (media_player.turn_off) and fire spinjam_stop."
+      "description": "End the SpinJam display session and fire spinjam_stop. Same as turning off switch.spinjam_cast."
+    },
+    "create_dashboard": {
+      "name": "Create SpinJam dashboard",
+      "description": "Create or update the storage-mode Lovelace dashboard (panel view + SpinJam card) used for Cast.",
+      "fields": {
+        "dashboard_path": {
+          "name": "Dashboard path",
+          "description": "Lovelace url_path (must include a hyphen). Defaults to options / spinjam-tv."
+        },
+        "view_path": {
+          "name": "View path",
+          "description": "View path inside the dashboard. Defaults to now."
+        }
+      }
     }
   }
 }

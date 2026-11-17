@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .const import (
+    CONF_DASHBOARD_PATH,
+    CONF_LYRIC_OFFSET_MS,
+    CONF_VIEW_PATH,
+    DEFAULT_DASHBOARD_PATH,
+    DEFAULT_VIEW_PATH,
     DOMAIN,
+    LEGACY_DASHBOARD_PATH,
     SERVICE_CLEAR_LOCK,
+    SERVICE_CREATE_DASHBOARD,
     SERVICE_IDENTIFY,
     SERVICE_SELECT_ALBUM,
     SERVICE_SET_SYNC_OFFSET,
@@ -21,7 +28,7 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["media_player", "select"]
+PLATFORMS = ["media_player", "select", "switch", "number"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -38,7 +45,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(
-        entry, [Platform.MEDIA_PLAYER, Platform.SELECT]
+        entry,
+        [Platform.MEDIA_PLAYER, Platform.SELECT, Platform.SWITCH, Platform.NUMBER],
     )
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
@@ -56,6 +64,43 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return unload_ok
 
 
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate config entry to the latest version."""
+    from .dashboard import dashboard_exists
+
+    version = entry.version
+    data = dict(entry.data)
+    options = dict(entry.options)
+
+    if version < 2:
+        # v2: lyric_offset sign flip (positive = lyrics later) → negate stored values.
+        for bag in (data, options):
+            if CONF_LYRIC_OFFSET_MS in bag:
+                try:
+                    bag[CONF_LYRIC_OFFSET_MS] = -int(bag[CONF_LYRIC_OFFSET_MS])
+                except (TypeError, ValueError):
+                    bag[CONF_LYRIC_OFFSET_MS] = 0
+
+        # Legacy default dashboard path "spinjam" is invalid in HA UI (needs hyphen).
+        # Migrate only when that dashboard does not already exist.
+        for bag in (data, options):
+            path = bag.get(CONF_DASHBOARD_PATH)
+            if path == LEGACY_DASHBOARD_PATH and not dashboard_exists(
+                hass, LEGACY_DASHBOARD_PATH
+            ):
+                bag[CONF_DASHBOARD_PATH] = DEFAULT_DASHBOARD_PATH
+                _LOGGER.info(
+                    "Migrated dashboard_path from %s to %s",
+                    LEGACY_DASHBOARD_PATH,
+                    DEFAULT_DASHBOARD_PATH,
+                )
+
+        hass.config_entries.async_update_entry(entry, data=data, options=options, version=2)
+        _LOGGER.info("Migrated SpinJam config entry to version 2")
+
+    return True
+
+
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await hass.config_entries.async_reload(entry.entry_id)
 
@@ -66,6 +111,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
     from homeassistant.helpers import config_validation as cv
 
     from .coordinator import SpinJamCoordinator
+    from .dashboard import async_create_spinjam_dashboard, validate_dashboard_url_path
 
     if hass.services.has_service(DOMAIN, SERVICE_IDENTIFY):
         return
@@ -109,6 +155,36 @@ def _async_register_services(hass: HomeAssistant) -> None:
         if coordinator:
             await coordinator.async_stop()
 
+    async def handle_create_dashboard(call: ServiceCall) -> None:
+        coordinator = await _coord()
+        opts: dict[str, Any] = {}
+        if coordinator is not None:
+            opts = {**coordinator.entry.data, **coordinator.entry.options}
+        path = call.data.get(CONF_DASHBOARD_PATH) or opts.get(
+            CONF_DASHBOARD_PATH, DEFAULT_DASHBOARD_PATH
+        )
+        view = call.data.get(CONF_VIEW_PATH) or opts.get(
+            CONF_VIEW_PATH, DEFAULT_VIEW_PATH
+        )
+        result = await async_create_spinjam_dashboard(
+            hass, dashboard_path=path, view_path=view
+        )
+        if coordinator is not None:
+            hass.config_entries.async_update_entry(
+                coordinator.entry,
+                options={
+                    **coordinator.entry.options,
+                    CONF_DASHBOARD_PATH: result["dashboard_path"],
+                    CONF_VIEW_PATH: result["view_path"],
+                },
+            )
+        _LOGGER.info(
+            "SpinJam dashboard ready at %s/%s (created=%s)",
+            result["dashboard_path"],
+            result["view_path"],
+            result["created"],
+        )
+
     hass.services.async_register(DOMAIN, SERVICE_IDENTIFY, handle_identify)
     hass.services.async_register(
         DOMAIN,
@@ -136,3 +212,14 @@ def _async_register_services(hass: HomeAssistant) -> None:
         schema=vol.Schema({vol.Optional("display"): cv.entity_id}),
     )
     hass.services.async_register(DOMAIN, SERVICE_STOP, handle_stop)
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_CREATE_DASHBOARD,
+        handle_create_dashboard,
+        schema=vol.Schema(
+            {
+                vol.Optional(CONF_DASHBOARD_PATH): validate_dashboard_url_path,
+                vol.Optional(CONF_VIEW_PATH): cv.string,
+            }
+        ),
+    )

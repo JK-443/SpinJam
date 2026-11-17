@@ -1,12 +1,14 @@
 # SpinJam TV now-playing dashboard (panel view for Cast).
-# One-time setup: create a Lovelace dashboard with URL path "spinjam"
-# that uses this view (path "now"), or paste the card into a Panel view.
+# Preferred path: spinjam-tv (HA requires a hyphen in dashboard url_path).
+# Or call service: spinjam.create_dashboard
 #
-# Cast service (called by spinjam.start):
+# Layout: details (art/meta/progress) left, karaoke lyrics right.
+#
+# Cast service (called by spinjam.start when built-in casting is on):
 #   service: cast.show_lovelace_view
 #   data:
-#     entity_id: media_player.living_room_tv
-#     dashboard_path: spinjam
+#     entity_id: media_player.example_tv
+#     dashboard_path: spinjam-tv
 #     view_path: now
 
 title: SpinJam
@@ -15,5 +17,13 @@ views:
     path: now
     type: panel
     cards:
-      - type: custom:spinjam-now-playing-card
-        entity: media_player.spinjam_now_playing
+      - type: horizontal-stack
+        cards:
+          - type: custom:spinjam-lyrics-card
+            entity: media_player.spinjam_now_playing
+            mode: details
+            offset_entity: number.spinjam_lyric_offset
+          - type: custom:spinjam-lyrics-card
+            entity: media_player.spinjam_now_playing
+            mode: lyrics
+            offset_entity: number.spinjam_lyric_offset
