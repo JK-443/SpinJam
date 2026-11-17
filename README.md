@@ -33,7 +33,8 @@ When a configured Sonos/Port player’s source is **Line-in**, SpinJam uses the 
    - `media_player.turntable` (Music Assistant)
    - Sonos rooms (`media_player.living_room`, `media_player.kitchen`, …)
    - Optional vinyl: `media_player.spinjam_turntable` (after the capture node is up)
-6. Enable lyrics; leave sync offset at `0` until you calibrate
+6. Optionally select **Displays** (TVs / Cast targets), e.g. `media_player.living_room_tv`, `media_player.bedroom_tv` (reorderable). `select.spinjam_display` picks which one to use; call `spinjam.start` (optional `display`) to fire `spinjam_start` for a Cast automation until built-in casting lands.
+7. Enable lyrics; leave sync offset at `0` until you calibrate
 
 ### Option B — Manual
 
@@ -44,7 +45,8 @@ Copy `custom_components/spinjam` into your HA `config/custom_components/spinjam`
 1. Play a track on any configured Music Assistant or Sonos player.  
 2. Open Developer Tools → States → `media_player.spinjam_now_playing`.  
 3. Confirm artist/title/album/art; with lyrics enabled, check `lyric_current` / `lyric_next`.  
-4. Services: `spinjam.identify`, `spinjam.set_sync_offset`, `spinjam.select_album`, `spinjam.clear_lock`.
+4. Services: `spinjam.identify`, `spinjam.set_sync_offset`, `spinjam.select_album`, `spinjam.clear_lock`, `spinjam.start`, `spinjam.stop`.
+5. Attributes on `media_player.spinjam_now_playing` include `displays` and `selected_display`.
 
 ## Vinyl capture node (optional source)
 
@@ -69,7 +71,7 @@ pytest -q
 
 ## Roadmap
 
-- **Display:** Lovelace now-playing view cast to a TV (`media_player.living_room_tv`)
+- **Display:** Built-in Cast of the Lovelace now-playing view to `select.spinjam_display` (today: automate on `spinjam_start` / `spinjam_stop`)
 - **Album lock:** Discogs tracklists + vinyl position confirm
 - **Polish:** art caching, scrobble
 

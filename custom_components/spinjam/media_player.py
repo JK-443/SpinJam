@@ -18,8 +18,10 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     ATTR_ACTIVE_SOURCE,
     ATTR_ALBUM_LOCK,
+    ATTR_DISPLAYS,
     ATTR_LYRIC_CURRENT,
     ATTR_LYRIC_NEXT,
+    ATTR_SELECTED_DISPLAY,
     ATTR_SOURCE_KIND,
     ATTR_SYNC_OFFSET_MS,
     DOMAIN,
@@ -105,6 +107,8 @@ class SpinJamMediaPlayer(CoordinatorEntity[SpinJamCoordinator], MediaPlayerEntit
             ATTR_LYRIC_NEXT: data.lyric_next,
             ATTR_SYNC_OFFSET_MS: data.sync_offset_ms,
             ATTR_ALBUM_LOCK: data.album_lock,
+            ATTR_DISPLAYS: list(self.coordinator.displays),
+            ATTR_SELECTED_DISPLAY: self.coordinator.selected_display,
         }
         if active:
             attrs[ATTR_ACTIVE_SOURCE] = active.entity_id

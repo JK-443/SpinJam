@@ -3,10 +3,11 @@
     "step": {
       "user": {
         "title": "SpinJam",
-        "description": "Select the media players SpinJam should watch. Put higher-priority sources first. When a Sonos/Port source is Line-in, SpinJam uses the vinyl player instead.",
+        "description": "Select the media players SpinJam should watch. Put higher-priority sources first. When a Sonos/Port source is Line-in, SpinJam uses the vinyl player instead. Optionally pick one or more display TVs to cast to later.",
         "data": {
           "name": "Name",
           "source_players": "Source media players",
+          "displays": "Display media players (optional)",
           "vinyl_player": "Vinyl MQTT media player",
           "lyrics_enabled": "Fetch LRCLIB synced lyrics",
           "sync_offset_ms": "Lyric sync offset (ms)"
@@ -24,15 +25,32 @@
     "step": {
       "init": {
         "title": "SpinJam options",
-        "description": "Update source priority list and lyric settings.",
+        "description": "Update source priority, displays, and lyric settings. Display order is the default cast preference; select.spinjam_display picks which one to use.",
         "data": {
           "name": "Name",
           "source_players": "Source media players",
+          "displays": "Display media players (optional)",
           "vinyl_player": "Vinyl MQTT media player",
           "lyrics_enabled": "Fetch LRCLIB synced lyrics",
           "sync_offset_ms": "Lyric sync offset (ms)"
         }
       }
+    }
+  },
+  "services": {
+    "start": {
+      "name": "Start SpinJam display",
+      "description": "Select a display and fire spinjam_start for Cast automations.",
+      "fields": {
+        "display": {
+          "name": "Display",
+          "description": "Optional configured media_player to cast to."
+        }
+      }
+    },
+    "stop": {
+      "name": "Stop SpinJam display",
+      "description": "Fire spinjam_stop for Cast automations."
     }
   }
 }

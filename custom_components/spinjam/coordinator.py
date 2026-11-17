@@ -5,20 +5,25 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import timedelta
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
     ATTR_ALBUM_LOCK,
+    ATTR_DISPLAYS,
     ATTR_LYRIC_CURRENT,
     ATTR_LYRIC_NEXT,
+    ATTR_SELECTED_DISPLAY,
     ATTR_SYNC_OFFSET_MS,
+    CONF_DISPLAY_ENTITY,
+    CONF_DISPLAYS,
     CONF_LYRICS_ENABLED,
     CONF_SOURCE_PLAYERS,
     CONF_SYNC_OFFSET_MS,
@@ -28,6 +33,8 @@ from .const import (
     DEFAULT_SYNC_OFFSET_MS,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
+    EVENT_SPINJAM_START,
+    EVENT_SPINJAM_STOP,
     MQTT_CMD_CLEAR,
     MQTT_CMD_IDENTIFY,
     MQTT_CMD_SELECT_ALBUM,
@@ -35,6 +42,9 @@ from .const import (
 )
 from .lyrics import LrcLibClient, LyricsResult, line_at
 from .source import ActiveSource, select_active_source, snapshot_from_state
+
+if TYPE_CHECKING:
+    from .select import SpinJamDisplaySelect
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -69,6 +79,8 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         self._unsub_state: Any = None
         self._tracked: list[str] = []
         self._last_lyrics_key: str | None = None
+        self.display_select: SpinJamDisplaySelect | None = None
+        self.selected_display: str | None = None
 
     def _client(self) -> LrcLibClient:
         if self._lyrics_client is None:
@@ -83,7 +95,25 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
     @property
     def vinyl_player(self) -> str | None:
         options = {**self.entry.data, **self.entry.options}
-        return options.get(CONF_VINYL_PLAYER)
+        return options.get(CONF_VINYL_PLAYER) or None
+
+    @property
+    def displays(self) -> list[str]:
+        """Configured display media_players (priority/order preserved).
+
+        Migrates legacy ``display_entity`` into a one-item list when ``displays``
+        is missing or empty.
+        """
+        options = {**self.entry.data, **self.entry.options}
+        raw = options.get(CONF_DISPLAYS)
+        if isinstance(raw, str) and raw:
+            return [raw]
+        if isinstance(raw, list) and raw:
+            return [str(item) for item in raw if item]
+        legacy = options.get(CONF_DISPLAY_ENTITY)
+        if legacy:
+            return [str(legacy)]
+        return []
 
     @property
     def lyrics_enabled(self) -> bool:
@@ -92,6 +122,8 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
 
     async def async_setup(self) -> None:
         self._async_watch_sources()
+        if self.displays and self.selected_display is None:
+            self.selected_display = self.displays[0]
         await self.async_refresh()
 
     @callback
@@ -160,6 +192,10 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         else:
             self._last_lyrics_key = None
 
+        # Keep select options in sync after options reload.
+        if self.display_select is not None:
+            self.display_select._sync_options_from_coordinator()  # noqa: SLF001
+
         return SpinJamData(
             active=active,
             lyric_current=lyric_current,
@@ -189,6 +225,37 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         await self._async_mqtt_publish(MQTT_CMD_CLEAR, "clear")
         await self.async_request_refresh()
 
+    async def async_start(self, display: str | None = None) -> str:
+        """Select a display and fire ``spinjam_start``.
+
+        TODO(phase-display): call HA Cast / browser_mod to show the SpinJam
+        Lovelace view on ``display`` instead of relying only on automations.
+        """
+        configured = self.displays
+        if not configured:
+            raise ServiceValidationError(
+                "No displays configured for SpinJam. Add media_player entities under Displays."
+            )
+        target = display or self.selected_display or configured[0]
+        if target not in configured:
+            raise ServiceValidationError(
+                f"{target} is not a configured SpinJam display. Choose one of: {', '.join(configured)}"
+            )
+        if self.display_select is not None:
+            await self.display_select.async_select_option(target)
+        else:
+            self.selected_display = target
+        self.hass.bus.async_fire(EVENT_SPINJAM_START, {"display": target})
+        await self.async_request_refresh()
+        return target
+
+    async def async_stop(self) -> None:
+        """Fire ``spinjam_stop`` (casting teardown left to automations for now)."""
+        payload: dict[str, Any] = {}
+        if self.selected_display:
+            payload["display"] = self.selected_display
+        self.hass.bus.async_fire(EVENT_SPINJAM_STOP, payload)
+
     async def _async_mqtt_publish(self, topic: str, payload: str) -> None:
         try:
             await self.hass.services.async_call(
@@ -207,6 +274,8 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             ATTR_LYRIC_CURRENT: self.data.lyric_current,
             ATTR_LYRIC_NEXT: self.data.lyric_next,
             ATTR_ALBUM_LOCK: self.data.album_lock,
+            ATTR_DISPLAYS: list(self.displays),
+            ATTR_SELECTED_DISPLAY: self.selected_display,
         }
         if active:
             attrs["active_source"] = active.entity_id

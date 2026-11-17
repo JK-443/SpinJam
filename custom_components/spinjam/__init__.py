@@ -11,6 +11,8 @@ from .const import (
     SERVICE_IDENTIFY,
     SERVICE_SELECT_ALBUM,
     SERVICE_SET_SYNC_OFFSET,
+    SERVICE_START,
+    SERVICE_STOP,
 )
 
 if TYPE_CHECKING:
@@ -19,7 +21,7 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["media_player"]
+PLATFORMS = ["media_player", "select"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -33,7 +35,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(
-        entry, [Platform.MEDIA_PLAYER]
+        entry, [Platform.MEDIA_PLAYER, Platform.SELECT]
     )
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
@@ -93,6 +95,17 @@ def _async_register_services(hass: HomeAssistant) -> None:
         if coordinator:
             await coordinator.async_clear_lock()
 
+    async def handle_start(call: ServiceCall) -> None:
+        coordinator = await _coord()
+        if coordinator:
+            await coordinator.async_start(call.data.get("display"))
+
+    async def handle_stop(call: ServiceCall) -> None:
+        _ = call
+        coordinator = await _coord()
+        if coordinator:
+            await coordinator.async_stop()
+
     hass.services.async_register(DOMAIN, SERVICE_IDENTIFY, handle_identify)
     hass.services.async_register(
         DOMAIN,
@@ -113,3 +126,10 @@ def _async_register_services(hass: HomeAssistant) -> None:
         schema=vol.Schema({vol.Required("album"): cv.string}),
     )
     hass.services.async_register(DOMAIN, SERVICE_CLEAR_LOCK, handle_clear_lock)
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_START,
+        handle_start,
+        schema=vol.Schema({vol.Optional("display"): cv.entity_id}),
+    )
+    hass.services.async_register(DOMAIN, SERVICE_STOP, handle_stop)

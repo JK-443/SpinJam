@@ -6,6 +6,9 @@ DOMAIN = "spinjam"
 
 CONF_SOURCE_PLAYERS = "source_players"
 CONF_VINYL_PLAYER = "vinyl_player"
+CONF_DISPLAYS = "displays"
+# Legacy single-display key (pre multi-display); read for migration only.
+CONF_DISPLAY_ENTITY = "display_entity"
 CONF_SYNC_OFFSET_MS = "sync_offset_ms"
 CONF_LYRICS_ENABLED = "lyrics_enabled"
 CONF_UPDATE_INTERVAL = "update_interval"
@@ -20,6 +23,8 @@ ATTR_LYRIC_NEXT = "lyric_next"
 ATTR_LYRIC_LINES = "lyric_lines"
 ATTR_ACTIVE_SOURCE = "active_source"
 ATTR_SOURCE_KIND = "source_kind"
+ATTR_DISPLAYS = "displays"
+ATTR_SELECTED_DISPLAY = "selected_display"
 ATTR_SYNC_OFFSET_MS = "sync_offset_ms"
 ATTR_ALBUM_LOCK = "album_lock"
 
@@ -27,6 +32,11 @@ SERVICE_IDENTIFY = "identify"
 SERVICE_SET_SYNC_OFFSET = "set_sync_offset"
 SERVICE_SELECT_ALBUM = "select_album"
 SERVICE_CLEAR_LOCK = "clear_lock"
+SERVICE_START = "start"
+SERVICE_STOP = "stop"
+
+EVENT_SPINJAM_START = "spinjam_start"
+EVENT_SPINJAM_STOP = "spinjam_stop"
 
 SOURCE_KIND_STREAM = "stream"
 SOURCE_KIND_VINYL = "vinyl"
@@ -49,3 +59,5 @@ MQTT_CMD_SELECT_ALBUM = "spinjam/cmd/select_album"
 
 LRCLIB_API = "https://lrclib.net/api/get"
 LYRICS_CACHE_SIZE = 64
+
+SELECT_DISPLAY_ENTITY_ID = "select.spinjam_display"
