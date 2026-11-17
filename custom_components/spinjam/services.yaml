@@ -4,11 +4,11 @@ identify:
 
 set_sync_offset:
   name: Set sync offset
-  description: Adjust lyric/position sync offset in milliseconds.
+  description: Adjust playback position sync offset in milliseconds (also used as the base for lyrics).
   fields:
     offset_ms:
       name: Offset
-      description: Milliseconds to add to media position for lyrics (negative = earlier).
+      description: Milliseconds to add to media position (negative = earlier). Fine-tune lyrics further with lyric_offset_ms in options.
       required: true
       selector:
         number:
@@ -35,8 +35,8 @@ start:
   name: Start SpinJam display
   description: >
     Select a configured display (or keep the current select.spinjam_display
-    choice) and fire a spinjam_start event. Cast the Lovelace now-playing view
-    with an automation on that event until built-in casting lands.
+    choice), cast the SpinJam Lovelace view via cast.show_lovelace_view, and
+    fire spinjam_start. Requires a one-time dashboard (see docs/TV_CAST.md).
   fields:
     display:
       name: Display
@@ -48,4 +48,6 @@ start:
 
 stop:
   name: Stop SpinJam display
-  description: Fire a spinjam_stop event (use an automation to clear the TV for now).
+  description: >
+    End the Cast session with media_player.turn_off on the active display and
+    fire spinjam_stop.

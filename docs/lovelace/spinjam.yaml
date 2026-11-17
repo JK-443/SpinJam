@@ -1,0 +1,19 @@
+# SpinJam TV now-playing dashboard (panel view for Cast).
+# One-time setup: create a Lovelace dashboard with URL path "spinjam"
+# that uses this view (path "now"), or paste the card into a Panel view.
+#
+# Cast service (called by spinjam.start):
+#   service: cast.show_lovelace_view
+#   data:
+#     entity_id: media_player.living_room_tv
+#     dashboard_path: spinjam
+#     view_path: now
+
+title: SpinJam
+views:
+  - title: Now
+    path: now
+    type: panel
+    cards:
+      - type: custom:spinjam-now-playing-card
+        entity: media_player.spinjam_now_playing

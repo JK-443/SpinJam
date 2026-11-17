@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from homeassistant.components.media_player import (
@@ -20,7 +21,9 @@ from .const import (
     ATTR_ALBUM_LOCK,
     ATTR_DISPLAYS,
     ATTR_LYRIC_CURRENT,
+    ATTR_LYRIC_LINES,
     ATTR_LYRIC_NEXT,
+    ATTR_LYRIC_OFFSET_MS,
     ATTR_SELECTED_DISPLAY,
     ATTR_SOURCE_KIND,
     ATTR_SYNC_OFFSET_MS,
@@ -92,11 +95,15 @@ class SpinJamMediaPlayer(CoordinatorEntity[SpinJamCoordinator], MediaPlayerEntit
         return int(active.duration)
 
     @property
-    def media_position(self) -> int | None:
+    def media_position(self) -> float | None:
         active = self.coordinator.data.active
         if not active or active.position is None:
             return None
-        return int(active.position)
+        return float(active.position)
+
+    @property
+    def media_position_updated_at(self) -> datetime | None:
+        return self.coordinator.data.position_updated_at
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -105,7 +112,9 @@ class SpinJamMediaPlayer(CoordinatorEntity[SpinJamCoordinator], MediaPlayerEntit
         attrs: dict[str, Any] = {
             ATTR_LYRIC_CURRENT: data.lyric_current,
             ATTR_LYRIC_NEXT: data.lyric_next,
+            ATTR_LYRIC_LINES: data.lyric_lines,
             ATTR_SYNC_OFFSET_MS: data.sync_offset_ms,
+            ATTR_LYRIC_OFFSET_MS: data.lyric_offset_ms,
             ATTR_ALBUM_LOCK: data.album_lock,
             ATTR_DISPLAYS: list(self.coordinator.displays),
             ATTR_SELECTED_DISPLAY: self.coordinator.selected_display,

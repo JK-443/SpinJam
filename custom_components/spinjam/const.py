@@ -10,17 +10,28 @@ CONF_DISPLAYS = "displays"
 # Legacy single-display key (pre multi-display); read for migration only.
 CONF_DISPLAY_ENTITY = "display_entity"
 CONF_SYNC_OFFSET_MS = "sync_offset_ms"
+CONF_LYRIC_OFFSET_MS = "lyric_offset_ms"
 CONF_LYRICS_ENABLED = "lyrics_enabled"
 CONF_UPDATE_INTERVAL = "update_interval"
+CONF_DASHBOARD_PATH = "dashboard_path"
+CONF_VIEW_PATH = "view_path"
+CONF_RECAST_WHILE_PLAYING = "recast_while_playing"
+CONF_RECAST_INTERVAL = "recast_interval"
 
 DEFAULT_NAME = "SpinJam Now Playing"
 DEFAULT_SYNC_OFFSET_MS = 0
+DEFAULT_LYRIC_OFFSET_MS = 0
 DEFAULT_LYRICS_ENABLED = True
 DEFAULT_UPDATE_INTERVAL = 1.0
+DEFAULT_DASHBOARD_PATH = "spinjam"
+DEFAULT_VIEW_PATH = "now"
+DEFAULT_RECAST_WHILE_PLAYING = True
+DEFAULT_RECAST_INTERVAL = 45.0
 
 ATTR_LYRIC_CURRENT = "lyric_current"
 ATTR_LYRIC_NEXT = "lyric_next"
 ATTR_LYRIC_LINES = "lyric_lines"
+ATTR_LYRIC_OFFSET_MS = "lyric_offset_ms"
 ATTR_ACTIVE_SOURCE = "active_source"
 ATTR_SOURCE_KIND = "source_kind"
 ATTR_DISPLAYS = "displays"

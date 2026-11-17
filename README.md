@@ -1,22 +1,24 @@
 # SpinJam
 
-**General now-playing for Home Assistant.** SpinJam aggregates Music Assistant, Sonos, and a vinyl MQTT capture node into one unified `media_player`, with optional LRCLIB synced lyrics. Vinyl recognition runs on a dedicated Pi — never on the HA host.
+**General now-playing for Home Assistant.** SpinJam aggregates Music Assistant, Sonos, and a vinyl MQTT capture node into one unified `media_player`, with optional LRCLIB synced lyrics and Cast to a TV. Vinyl recognition runs on a dedicated Pi — never on the HA host.
 
 ## Pieces
 
 | Path | What |
 | --- | --- |
-| [`custom_components/spinjam`](custom_components/spinjam) | HACS-installable HA integration (brain) |
+| [`custom_components/spinjam`](custom_components/spinjam) | HACS-installable HA integration (brain + TV card) |
 | [`spinjam/`](spinjam) | Vinyl capture/recognition MQTT node (Pi) |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System design |
+| [`docs/TV_CAST.md`](docs/TV_CAST.md) | TV now-playing card + Cast setup |
 | [`docs/PHASE0_HARDWARE.md`](docs/PHASE0_HARDWARE.md) | Port OUT → UCA202 cabling |
 | [`docs/FIXTURE_MODE.md`](docs/FIXTURE_MODE.md) | Test vinyl node without USB hardware |
 
 ```
 Music Assistant / Sonos media_players ──┐
-                                        ├─► HA SpinJam integration ─► media_player.spinjam_now_playing
+                                        ├─► HA SpinJam ─► media_player.spinjam_now_playing
 Vinyl Pi (Shazam → MQTT) ───────────────┘         │
-                                                  └─ LRCLIB lyrics (cached)
+                                                  ├─ LRCLIB lyrics (cached)
+                                                  └─ cast.show_lovelace_view → TV
 ```
 
 When a configured Sonos/Port player’s source is **Line-in**, SpinJam uses the vinyl MQTT player instead of Port metadata.
@@ -33,20 +35,29 @@ When a configured Sonos/Port player’s source is **Line-in**, SpinJam uses the 
    - `media_player.turntable` (Music Assistant)
    - Sonos rooms (`media_player.living_room`, `media_player.kitchen`, …)
    - Optional vinyl: `media_player.spinjam_turntable` (after the capture node is up)
-6. Optionally select **Displays** (TVs / Cast targets), e.g. `media_player.living_room_tv`, `media_player.bedroom_tv` (reorderable). `select.spinjam_display` picks which one to use; call `spinjam.start` (optional `display`) to fire `spinjam_start` for a Cast automation until built-in casting lands.
-7. Enable lyrics; leave sync offset at `0` until you calibrate
+6. Optionally select **Displays** (Cast / Google TV targets), e.g. `media_player.living_room_tv`
+7. Enable lyrics; leave sync / lyric offsets at `0` until you calibrate
+
+The TV card ships with the integration (`/spinjam/spinjam-now-playing-card.js`) — no separate frontend install.
 
 ### Option B — Manual
 
 Copy `custom_components/spinjam` into your HA `config/custom_components/spinjam`, restart, then add the integration as above.
 
+### Cast the now-playing view (one-time)
+
+1. Ensure **Google Cast** is set up and HA has an HTTPS **External URL**.  
+2. Create a Lovelace dashboard path `spinjam` with a panel view path `now` using `custom:spinjam-now-playing-card` (full steps: [`docs/TV_CAST.md`](docs/TV_CAST.md)).  
+3. Configure SpinJam options: displays + dashboard/view paths (defaults match above).  
+4. Call `spinjam.start` / `spinjam.stop` (or automate on Port Line-in).
+
 ### Try it
 
 1. Play a track on any configured Music Assistant or Sonos player.  
 2. Open Developer Tools → States → `media_player.spinjam_now_playing`.  
-3. Confirm artist/title/album/art; with lyrics enabled, check `lyric_current` / `lyric_next`.  
+3. Confirm artist/title/album/art; with lyrics enabled, check `lyric_current` / `lyric_next` / `lyric_lines`.  
 4. Services: `spinjam.identify`, `spinjam.set_sync_offset`, `spinjam.select_album`, `spinjam.clear_lock`, `spinjam.start`, `spinjam.stop`.
-5. Attributes on `media_player.spinjam_now_playing` include `displays` and `selected_display`.
+5. Attributes include `displays`, `selected_display`, `lyric_offset_ms`.
 
 ## Vinyl capture node (optional source)
 
@@ -71,7 +82,6 @@ pytest -q
 
 ## Roadmap
 
-- **Display:** Built-in Cast of the Lovelace now-playing view to `select.spinjam_display` (today: automate on `spinjam_start` / `spinjam_stop`)
 - **Album lock:** Discogs tracklists + vinyl position confirm
 - **Polish:** art caching, scrobble
 
