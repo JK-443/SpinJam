@@ -20,9 +20,9 @@ SpinJam is a **general now-playing system**. Vinyl is one source among Music Ass
 
 ## Displays + Cast
 
-1. Config/options `displays` is an optional ordered list of `media_player` entities (e.g. `media_player.living_room_tv`).
+1. Config/options `displays` is an optional ordered list of Google Cast `media_player` entities (e.g. `media_player.example_tv`).
 2. `select.spinjam_display` exposes those options; default is the first; last choice is restored after restart.
-3. `spinjam.start` / `switch.spinjam_cast` on (optional `display`) validates against the list, updates the select, and fires `spinjam_start`. When **built-in casting** is on (default), also calls `cast.show_lovelace_view` with configurable `dashboard_path` / `view_path` (defaults `spinjam` / `now`).
+3. `spinjam.start` / `switch.spinjam_cast` on (optional `display`) validates against the list, updates the select, and fires `spinjam_start`. When **built-in casting** is on (default), also calls `cast.show_lovelace_view` with configurable `dashboard_path` / `view_path` (defaults `spinjam-tv` / `now`; path must include a hyphen). Non-cast platforms are skipped with a warning.
 4. Optional re-cast while playing recovers dropped Cast sessions; optional **recast on startup** (default off) re-starts Cast after HA restart if the Cast switch was on.
 5. `spinjam.stop` / Cast switch off ends Cast via `media_player.turn_off` when built-in casting is on, and always fires `spinjam_stop`. External Cast end (display off/unavailable) clears the logical session and the Cast switch.
 6. `switch.spinjam_tracking` (default on, RestoreEntity): off pauses source watchers and the ~1 s poll; now-playing **holds** the last snapshot. Tracking off does not stop Cast.

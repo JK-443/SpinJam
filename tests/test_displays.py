@@ -34,8 +34,8 @@ def _entry(**overrides):
         CONF_NAME: "SpinJam",
         CONF_SOURCE_PLAYERS: ["media_player.living_room"],
         CONF_DISPLAYS: [
-            "media_player.living_room_tv",
-            "media_player.bedroom_tv",
+            "media_player.example_tv",
+            "media_player.example_tv_2",
         ],
         CONF_LYRICS_ENABLED: False,
         CONF_SYNC_OFFSET_MS: 0,
@@ -54,18 +54,18 @@ def _entry(**overrides):
 async def test_displays_and_legacy_migration(hass: HomeAssistant) -> None:
     entry = _entry(
         unique_id=f"{DOMAIN}_legacy",
-        **{CONF_DISPLAYS: [], CONF_DISPLAY_ENTITY: "media_player.living_room_tv"},
+        **{CONF_DISPLAYS: [], CONF_DISPLAY_ENTITY: "media_player.example_tv"},
     )
     entry.add_to_hass(hass)
     coordinator = SpinJamCoordinator(hass, entry)
-    assert coordinator.displays == ["media_player.living_room_tv"]
+    assert coordinator.displays == ["media_player.example_tv"]
 
     entry2 = _entry(unique_id=f"{DOMAIN}_multi")
     entry2.add_to_hass(hass)
     coordinator2 = SpinJamCoordinator(hass, entry2)
     assert coordinator2.displays == [
-        "media_player.living_room_tv",
-        "media_player.bedroom_tv",
+        "media_player.example_tv",
+        "media_player.example_tv_2",
     ]
 
 
@@ -94,7 +94,7 @@ async def test_start_validates_display_and_fires_event(hass: HomeAssistant) -> N
     coordinator = SpinJamCoordinator(hass, entry)
     # Avoid starting the interval updater (debounce timers) for this unit test.
     coordinator.selected_display = coordinator.displays[0]
-    assert coordinator.selected_display == "media_player.living_room_tv"
+    assert coordinator.selected_display == "media_player.example_tv"
 
     events: list[dict] = []
 
@@ -113,11 +113,11 @@ async def test_start_validates_display_and_fires_event(hass: HomeAssistant) -> N
         new_callable=AsyncMock,
         return_value=True,
     ):
-        target = await coordinator.async_start("media_player.bedroom_tv")
-    assert target == "media_player.bedroom_tv"
-    assert coordinator.selected_display == "media_player.bedroom_tv"
+        target = await coordinator.async_start("media_player.example_tv_2")
+    assert target == "media_player.example_tv_2"
+    assert coordinator.selected_display == "media_player.example_tv_2"
     await hass.async_block_till_done()
-    assert events and events[-1]["display"] == "media_player.bedroom_tv"
+    assert events and events[-1]["display"] == "media_player.example_tv_2"
     await coordinator.async_shutdown()
     await hass.async_stop()
 
@@ -137,7 +137,7 @@ async def test_stop_fires_event(hass: HomeAssistant) -> None:
     ):
         await coordinator.async_stop()
     await hass.async_block_till_done()
-    assert events and events[-1].get("display") == "media_player.living_room_tv"
+    assert events and events[-1].get("display") == "media_player.example_tv"
     await hass.async_stop()
 
 
@@ -158,17 +158,17 @@ async def test_media_player_exposes_display_attributes(hass: HomeAssistant) -> N
     state = hass.states.get("media_player.spinjam_now_playing")
     assert state is not None
     assert state.attributes.get(ATTR_DISPLAYS) == [
-        "media_player.living_room_tv",
-        "media_player.bedroom_tv",
+        "media_player.example_tv",
+        "media_player.example_tv_2",
     ]
-    assert state.attributes.get(ATTR_SELECTED_DISPLAY) == "media_player.living_room_tv"
+    assert state.attributes.get(ATTR_SELECTED_DISPLAY) == "media_player.example_tv"
 
     select_state = hass.states.get("select.spinjam_display")
     assert select_state is not None
-    assert select_state.state == "media_player.living_room_tv"
+    assert select_state.state == "media_player.example_tv"
     assert set(select_state.attributes.get("options", [])) == {
-        "media_player.living_room_tv",
-        "media_player.bedroom_tv",
+        "media_player.example_tv",
+        "media_player.example_tv_2",
     }
 
     assert hass.services.has_service(DOMAIN, "start")
@@ -190,10 +190,10 @@ async def test_schema_includes_displays() -> None:
         {
             "name": "SpinJam",
             "source_players": ["media_player.living_room"],
-            "displays": ["media_player.living_room_tv"],
+            "displays": ["media_player.example_tv"],
             "lyrics_enabled": True,
             "sync_offset_ms": 0,
             "lyric_offset_ms": 0,
         }
     )
-    assert data[CONF_DISPLAYS] == ["media_player.living_room_tv"]
+    assert data[CONF_DISPLAYS] == ["media_player.example_tv"]

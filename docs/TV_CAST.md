@@ -1,7 +1,7 @@
 # TV now-playing + Cast
 
 SpinJam casts a full-screen now-playing Lovelace view to a Google Cast /
-Google TV `media_player` (e.g. `media_player.living_room_tv`) when you call
+Google TV `media_player` (e.g. `media_player.example_tv`) when you call
 `spinjam.start` or turn on `switch.spinjam_cast`. `spinjam.stop` / Cast switch
 off ends the session.
 
@@ -9,12 +9,14 @@ Browser Mod and Fully Kiosk are **not** required.
 
 ## One-time Home Assistant setup
 
-HA does not let custom integrations reliably auto-create Lovelace dashboards
-across YAML and storage modes, so create the dashboard once:
+Home Assistant **requires a hyphen** in new dashboard URL paths (e.g.
+`spinjam-tv`, not `spinjam`). SpinJam defaults to `spinjam-tv` / `now`.
 
 ### 1. Prerequisites
 
-1. **Google Cast** integration enabled; your TV appears as a `media_player`.
+1. **Google Cast** integration enabled; your TV appears as a Cast `media_player`
+   (entity registry platform `cast`). Non-cast displays are skipped at start
+   with a warning.
 2. Home Assistant reachable over **HTTPS** with a valid **External URL**
    (Settings → System → Network). Cast cannot load HTTP-only dashboards.
 3. SpinJam installed (HACS or manual). The custom card is registered at
@@ -23,10 +25,23 @@ across YAML and storage modes, so create the dashboard once:
 
 ### 2. Create the dashboard + view
 
-**UI (storage mode):**
+**Preferred — one-shot service (storage mode):**
+
+```yaml
+service: spinjam.create_dashboard
+# optional:
+# data:
+#   dashboard_path: spinjam-tv
+#   view_path: now
+```
+
+This creates a storage-mode dashboard with a panel view and the SpinJam card.
+Safe to run again (updates the view config in place).
+
+**Manual UI:**
 
 1. Settings → Dashboards → **Add dashboard**
-2. Title: `SpinJam`, URL path: `spinjam` (must match options `dashboard_path`)
+2. Title: `SpinJam`, URL path: `spinjam-tv` (must include a hyphen; must match options `dashboard_path`)
 3. Open the dashboard → edit → add a view:
    - Title: `Now`
    - Path: `now` (must match options `view_path`)
@@ -46,13 +61,13 @@ and reference it from `lovelace:` / dashboards config).
 
 Settings → Devices & services → SpinJam → Configure:
 
-- **Displays:** e.g. `media_player.living_room_tv`
+- **Displays:** Google Cast targets only, e.g. `media_player.example_tv`
 - **Built-in casting:** on (default). When off, start/stop and `switch.spinjam_cast` only fire `spinjam_start` / `spinjam_stop` (no `cast.show_lovelace_view`) so you can cast from your own automations without double-casting. Events always fire either way.
-- **Cast dashboard path:** `spinjam` (default)
+- **Cast dashboard path:** `spinjam-tv` (default; must contain a hyphen)
 - **Cast view path:** `now` (default)
 - **Re-cast while playing:** on (default) — recovers dropped Cast sessions
 - **Recast on startup:** off (default). Cast sessions do not survive HA restart; leave this off unless you want SpinJam to call start again when the Cast switch was previously on.
-- **Lyric display offset (ms):** fine-tune highlight timing (see below)
+- **Lyric display offset (ms):** positive = lyrics appear **later** (see below)
 
 ## Switches
 
@@ -73,7 +88,7 @@ target:
 ```yaml
 service: spinjam.start
 data:
-  display: media_player.living_room_tv   # optional; uses select.spinjam_display
+  display: media_player.example_tv   # optional; uses select.spinjam_display
 ```
 
 ```yaml
@@ -93,7 +108,7 @@ trigger:
 action:
   - service: spinjam.start
     data:
-      display: media_player.living_room_tv
+      display: media_player.example_tv
 mode: single
 ```
 
@@ -148,8 +163,9 @@ ends the Cast session on Google TV / Chromecast without needing Browser Mod.
 
 ## Known limitations
 
-- Dashboard/view must exist before the first `spinjam.start` (one-time setup).
+- Dashboard/view must exist before the first `spinjam.start` (use `spinjam.create_dashboard` or create manually; path needs a hyphen).
 - Cast requires HTTPS external URL; local HTTP-only setups will not work.
+- Displays should be Google Cast entities; other `media_player` platforms are skipped for built-in casting.
 - Re-cast briefly reloads the Lovelace view (possible flash every N seconds).
 - `lyric_lines` is capped (~120 lines) to keep state attributes light on Pi 4.
 - Bravia / Google TV power policies may still sleep the panel after idle.

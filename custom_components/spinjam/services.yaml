@@ -8,7 +8,7 @@ set_sync_offset:
   fields:
     offset_ms:
       name: Offset
-      description: Milliseconds to add to media position (negative = earlier). Fine-tune lyrics further with lyric_offset_ms in options.
+      description: Milliseconds to add to media position (negative = earlier). Fine-tune lyrics further with lyric_offset_ms (positive = lyrics later).
       required: true
       selector:
         number:
@@ -52,3 +52,23 @@ stop:
   description: >
     End the SpinJam cast session (media_player.turn_off when built-in casting
     is on) and fire spinjam_stop. Same as turning off switch.spinjam_cast.
+
+create_dashboard:
+  name: Create SpinJam dashboard
+  description: >
+    Create or update a storage-mode Lovelace dashboard with a panel view and
+    the SpinJam now-playing card (for cast.show_lovelace_view). Dashboard path
+    must include a hyphen (default spinjam-tv).
+  fields:
+    dashboard_path:
+      name: Dashboard path
+      description: Lovelace url_path (must contain a hyphen).
+      required: false
+      selector:
+        text:
+    view_path:
+      name: View path
+      description: View path inside the dashboard (default now).
+      required: false
+      selector:
+        text:

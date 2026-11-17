@@ -35,7 +35,7 @@ When a configured Sonos/Port player’s source is **Line-in**, SpinJam uses the 
    - `media_player.turntable` (Music Assistant)
    - Sonos rooms (`media_player.living_room`, `media_player.kitchen`, …)
    - Optional vinyl: `media_player.spinjam_turntable` (after the capture node is up)
-6. Optionally select **Displays** (Cast / Google TV targets), e.g. `media_player.living_room_tv`
+6. Optionally select **Displays** (Google Cast targets), e.g. `media_player.example_tv`
 7. Enable lyrics; leave sync / lyric offsets at `0` until you calibrate
 
 The TV card ships with the integration (`/spinjam/spinjam-now-playing-card.js`) — no separate frontend install.
@@ -47,8 +47,8 @@ Copy `custom_components/spinjam` into your HA `config/custom_components/spinjam`
 ### Cast the now-playing view (one-time)
 
 1. Ensure **Google Cast** is set up and HA has an HTTPS **External URL**.  
-2. Create a Lovelace dashboard path `spinjam` with a panel view path `now` using `custom:spinjam-now-playing-card` (full steps: [`docs/TV_CAST.md`](docs/TV_CAST.md)).  
-3. Configure SpinJam options: displays + dashboard/view paths (defaults match above).  
+2. Call `spinjam.create_dashboard` (or manually create Lovelace path `spinjam-tv` with panel view `now` — HA requires a hyphen in the path). Full steps: [`docs/TV_CAST.md`](docs/TV_CAST.md).  
+3. Configure SpinJam options: Cast displays + dashboard/view paths (defaults `spinjam-tv` / `now`).  
 4. Use `switch.spinjam_cast`, or `spinjam.start` / `spinjam.stop` (or automate on Port Line-in).
 
 ### Switches

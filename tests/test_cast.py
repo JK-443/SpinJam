@@ -35,11 +35,11 @@ def _entry(**overrides):
     data = {
         CONF_NAME: "SpinJam",
         CONF_SOURCE_PLAYERS: ["media_player.living_room"],
-        CONF_DISPLAYS: ["media_player.living_room_tv"],
+        CONF_DISPLAYS: ["media_player.example_tv"],
         CONF_LYRICS_ENABLED: False,
         CONF_SYNC_OFFSET_MS: 0,
         CONF_LYRIC_OFFSET_MS: 0,
-        CONF_DASHBOARD_PATH: "spinjam",
+        CONF_DASHBOARD_PATH: "spinjam-tv",
         CONF_VIEW_PATH: "now",
         CONF_RECAST_WHILE_PLAYING: False,
     }
@@ -68,17 +68,17 @@ async def test_start_casts_lovelace_view(hass: HomeAssistant) -> None:
         new_callable=AsyncMock,
         return_value=True,
     ) as show:
-        target = await coordinator.async_start("media_player.living_room_tv")
+        target = await coordinator.async_start("media_player.example_tv")
         await hass.async_block_till_done()
 
-    assert target == "media_player.living_room_tv"
+    assert target == "media_player.example_tv"
     assert coordinator._cast_active is True  # noqa: SLF001
     show.assert_awaited_once()
     kwargs = show.await_args.kwargs
-    assert kwargs["entity_id"] == "media_player.living_room_tv"
-    assert kwargs["dashboard_path"] == "spinjam"
+    assert kwargs["entity_id"] == "media_player.example_tv"
+    assert kwargs["dashboard_path"] == "spinjam-tv"
     assert kwargs["view_path"] == "now"
-    assert events and events[-1]["display"] == "media_player.living_room_tv"
+    assert events and events[-1]["display"] == "media_player.example_tv"
     await coordinator.async_shutdown()
     await hass.async_stop()
 
@@ -88,9 +88,9 @@ async def test_stop_turns_off_cast_entity(hass: HomeAssistant) -> None:
     entry = _entry(unique_id=f"{DOMAIN}_cast_stop")
     entry.add_to_hass(hass)
     coordinator = SpinJamCoordinator(hass, entry)
-    coordinator.selected_display = "media_player.living_room_tv"
+    coordinator.selected_display = "media_player.example_tv"
     coordinator._cast_active = True  # noqa: SLF001
-    coordinator._cast_display = "media_player.living_room_tv"  # noqa: SLF001
+    coordinator._cast_display = "media_player.example_tv"  # noqa: SLF001
 
     events: list[dict] = []
     hass.bus.async_listen(EVENT_SPINJAM_STOP, lambda e: events.append(e.data))
@@ -103,9 +103,9 @@ async def test_stop_turns_off_cast_entity(hass: HomeAssistant) -> None:
         await coordinator.async_stop()
         await hass.async_block_till_done()
 
-    end.assert_awaited_once_with(hass, "media_player.living_room_tv")
+    end.assert_awaited_once_with(hass, "media_player.example_tv")
     assert coordinator._cast_active is False  # noqa: SLF001
-    assert events and events[-1].get("display") == "media_player.living_room_tv"
+    assert events and events[-1].get("display") == "media_player.example_tv"
     await coordinator.async_shutdown()
     await hass.async_stop()
 
@@ -125,21 +125,22 @@ async def test_cast_helpers_call_services() -> None:
 
     ok = await cast_mod.async_show_now_playing(
         fake_hass,
-        entity_id="media_player.living_room_tv",
-        dashboard_path="spinjam",
+        entity_id="media_player.example_tv",
+        dashboard_path="spinjam-tv",
         view_path="now",
     )
     assert ok is True
-    ok2 = await cast_mod.async_end_cast(fake_hass, "media_player.living_room_tv")
+    ok2 = await cast_mod.async_end_cast(fake_hass, "media_player.example_tv")
     assert ok2 is True
 
     assert recorded[0][:2] == ("cast", "show_lovelace_view")
-    assert recorded[0][2]["dashboard_path"] == "spinjam"
+    assert recorded[0][2]["dashboard_path"] == "spinjam-tv"
     assert recorded[1][:2] == ("media_player", "turn_off")
 
 
 @pytest.mark.asyncio
-async def test_lyric_offset_and_lines(hass: HomeAssistant) -> None:
+async def test_lyric_offset_positive_means_later(hass: HomeAssistant) -> None:
+    """Positive lyric_offset_ms delays highlight (look earlier in the LRC)."""
     hass.states.async_set(
         "media_player.living_room",
         "playing",
@@ -155,7 +156,8 @@ async def test_lyric_offset_and_lines(hass: HomeAssistant) -> None:
         unique_id=f"{DOMAIN}_lyrics_offset",
         **{
             CONF_LYRICS_ENABLED: True,
-            CONF_LYRIC_OFFSET_MS: -5000,  # 5s earlier → still on "Everything" at t=25
+            # +5s later → position 30 maps to lyric lookup at 25 → "Everything"
+            CONF_LYRIC_OFFSET_MS: 5000,
             CONF_DISPLAYS: [],
         },
     )
@@ -175,13 +177,12 @@ async def test_lyric_offset_and_lines(hass: HomeAssistant) -> None:
         coordinator = SpinJamCoordinator(hass, entry)
         await coordinator.async_refresh()
 
-    # position 30 + (-5s) = 25 → "Everything"
     assert coordinator.data.lyric_current == "Everything"
-    assert coordinator.data.lyric_offset_ms == -5000
+    assert coordinator.data.lyric_offset_ms == 5000
     assert coordinator.data.lyric_lines is not None
     assert coordinator.data.lyric_lines[1]["text"] == "Everything"
     attrs = coordinator.as_attributes()
-    assert attrs[ATTR_LYRIC_OFFSET_MS] == -5000
+    assert attrs[ATTR_LYRIC_OFFSET_MS] == 5000
     assert attrs[ATTR_LYRIC_LINES][0]["t"] == 0.0
     await coordinator.async_shutdown()
 
@@ -189,25 +190,32 @@ async def test_lyric_offset_and_lines(hass: HomeAssistant) -> None:
 @pytest.mark.asyncio
 async def test_options_schema_includes_cast_fields() -> None:
     pytest.importorskip("homeassistant")
+    import pytest as _pytest
     from custom_components.spinjam.config_flow import _schema
+    from custom_components.spinjam.dashboard import validate_dashboard_url_path
+    import voluptuous as vol
 
     schema = _schema(options=True)
     data = schema(
         {
             "name": "SpinJam",
             "source_players": ["media_player.living_room"],
-            "displays": ["media_player.living_room_tv"],
+            "displays": ["media_player.example_tv"],
             "lyrics_enabled": True,
             "sync_offset_ms": 0,
             "lyric_offset_ms": 100,
             "builtin_casting": True,
-            "dashboard_path": "spinjam",
+            "dashboard_path": "spinjam-tv",
             "view_path": "now",
             "recast_while_playing": True,
             "recast_interval": 45,
             "recast_on_startup": False,
         }
     )
-    assert data[CONF_DASHBOARD_PATH] == "spinjam"
+    assert data[CONF_DASHBOARD_PATH] == "spinjam-tv"
     assert data[CONF_VIEW_PATH] == "now"
     assert data[CONF_LYRIC_OFFSET_MS] == 100
+
+    with _pytest.raises(vol.Invalid):
+        validate_dashboard_url_path("spinjam")
+    assert validate_dashboard_url_path("spinjam-tv") == "spinjam-tv"

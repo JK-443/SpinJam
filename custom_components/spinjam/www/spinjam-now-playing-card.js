@@ -59,10 +59,10 @@ class SpinJamNowPlayingCard extends HTMLElement {
     return Math.max(0, pos);
   }
 
-  /** Position used for lyric highlight (adds lyric_offset_ms). */
+  /** Position used for lyric highlight (positive lyric_offset_ms = lyrics later). */
   _lyricPosition(state) {
     const attrs = (state && state.attributes) || {};
-    return this._position(state) + Number(attrs.lyric_offset_ms || 0) / 1000;
+    return this._position(state) - Number(attrs.lyric_offset_ms || 0) / 1000;
   }
 
   _render(fromTick) {

@@ -16,6 +16,7 @@ from homeassistant.helpers.event import async_track_state_change_event, async_tr
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .cast import async_end_cast, async_show_now_playing, cast_options
+from .cast_entities import cast_platform_status
 from .const import (
     ATTR_ALBUM_LOCK,
     ATTR_DISPLAYS,
@@ -273,8 +274,9 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
                 lyrics = self.data.lyrics
             lyric_lines = self._lines_payload(lyrics)
             if lyrics and active.position is not None:
-                lyric_pos = active.position + (lyric_offset / 1000.0)
-                lyric_current, lyric_next = line_at(lyrics.lines, lyric_pos)
+                # Positive lyric_offset_ms = lyrics appear later → look earlier in LRC.
+                lyric_pos = active.position - (lyric_offset / 1000.0)
+                lyric_current, lyric_next = line_at(lyrics.lines, max(0.0, lyric_pos))
         else:
             self._last_lyrics_key = None
 
@@ -376,7 +378,17 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             self.selected_display = target
 
         opts = cast_options(self._options())
-        if self.builtin_casting:
+        do_builtin = self.builtin_casting
+        if do_builtin:
+            status = cast_platform_status(self.hass, target)
+            if status == "not_cast":
+                _LOGGER.warning(
+                    "Display %s is not a Google Cast entity (platform != cast); "
+                    "skipping cast.show_lovelace_view — spinjam_start will still fire",
+                    target,
+                )
+                do_builtin = False
+        if do_builtin:
             await async_show_now_playing(
                 self.hass,
                 entity_id=target,
@@ -400,7 +412,12 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         was_active = self._cast_active
         self._ending_cast = True
         try:
-            if display and was_active and self.builtin_casting:
+            if (
+                display
+                and was_active
+                and self.builtin_casting
+                and cast_platform_status(self.hass, display) != "not_cast"
+            ):
                 await async_end_cast(self.hass, display)
             self._async_set_cast_active(False)
         finally:

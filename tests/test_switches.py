@@ -33,7 +33,7 @@ def _entry(**overrides):
     data = {
         CONF_NAME: "SpinJam",
         CONF_SOURCE_PLAYERS: ["media_player.living_room"],
-        CONF_DISPLAYS: ["media_player.living_room_tv"],
+        CONF_DISPLAYS: ["media_player.example_tv"],
         CONF_LYRICS_ENABLED: False,
         CONF_SYNC_OFFSET_MS: 0,
         CONF_RECAST_WHILE_PLAYING: False,
@@ -130,13 +130,15 @@ async def test_builtin_casting_off_fires_events_only(hass: HomeAssistant) -> Non
         ) as end,
     ):
         await coordinator.async_start()
+        await hass.async_block_till_done()
         assert coordinator.cast_active is True
         show.assert_not_awaited()
         await coordinator.async_stop()
+        await hass.async_block_till_done()
         assert coordinator.cast_active is False
         end.assert_not_awaited()
 
-    assert events and events[-1]["display"] == "media_player.living_room_tv"
+    assert events and events[-1]["display"] == "media_player.example_tv"
     await coordinator.async_shutdown()
     await hass.async_stop()
 
@@ -145,9 +147,9 @@ async def test_builtin_casting_off_fires_events_only(hass: HomeAssistant) -> Non
 async def test_cast_clears_when_display_goes_off(hass: HomeAssistant) -> None:
     entry = _entry(unique_id=f"{DOMAIN}_cast_drop")
     entry.add_to_hass(hass)
-    hass.states.async_set("media_player.living_room_tv", "playing", {})
+    hass.states.async_set("media_player.example_tv", "playing", {})
     coordinator = SpinJamCoordinator(hass, entry)
-    coordinator.selected_display = "media_player.living_room_tv"
+    coordinator.selected_display = "media_player.example_tv"
     coordinator.async_request_refresh = AsyncMock()  # type: ignore[method-assign]
 
     with patch(
@@ -158,7 +160,7 @@ async def test_cast_clears_when_display_goes_off(hass: HomeAssistant) -> None:
         await coordinator.async_start()
     assert coordinator.cast_active is True
 
-    hass.states.async_set("media_player.living_room_tv", STATE_OFF, {})
+    hass.states.async_set("media_player.example_tv", STATE_OFF, {})
     await hass.async_block_till_done()
     assert coordinator.cast_active is False
     await coordinator.async_shutdown()
@@ -313,12 +315,12 @@ async def test_options_schema_includes_builtin_casting() -> None:
         {
             "name": "SpinJam",
             "source_players": ["media_player.living_room"],
-            "displays": ["media_player.living_room_tv"],
+            "displays": ["media_player.example_tv"],
             "lyrics_enabled": True,
             "sync_offset_ms": 0,
             "lyric_offset_ms": 0,
             "builtin_casting": False,
-            "dashboard_path": "spinjam",
+            "dashboard_path": "spinjam-tv",
             "view_path": "now",
             "recast_while_playing": True,
             "recast_interval": 45,
