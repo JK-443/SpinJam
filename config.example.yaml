@@ -1,0 +1,63 @@
+# SpinJam capture node configuration
+# Copy to config.yaml on the Pi and edit.
+
+mqtt:
+  host: 192.168.4.10          # Mosquitto / HA broker
+  port: 1883
+  username: null              # or "mqtt_user"
+  password: null
+  client_id: spinjam-capture
+  topic_prefix: spinjam
+  discovery_prefix: homeassistant
+  availability_topic: spinjam/status
+
+device:
+  name: SpinJam Turntable
+  manufacturer: SpinJam
+  model: capture-node
+  identifiers:
+    - spinjam_turntable
+
+capture:
+  # "alsa" for live USB audio, "file" for fixture / end-to-end testing without hardware
+  mode: file
+  # ALSA device (UCA202 usually shows as "hw:1,0" or a plughw:* — check `arecord -l`)
+  alsa_device: "plughw:1,0"
+  sample_rate: 44100
+  channels: 2
+  # Path used when mode=file (WAV PCM 16-bit preferred)
+  file_path: fixtures/sample_music.wav
+  # When mode=file, loop the fixture forever (useful for long soak tests)
+  file_loop: true
+  # Simulated realtime pacing for file mode (false = as-fast-as-possible for unit tests)
+  file_realtime: true
+
+silence:
+  # RMS threshold in dBFS. Above = music, below = silence/gap.
+  threshold_db: -35.0
+  # How long level must stay above threshold to enter MUSIC
+  music_hold_ms: 400
+  # How long level must stay below threshold to leave MUSIC into GAP
+  gap_hold_ms: 1500
+  # After GAP, how long of silence before IDLE (needle up / side flip pause)
+  idle_hold_ms: 8000
+  # Analysis hop
+  frame_ms: 100
+
+identify:
+  enabled: true
+  # Seconds of audio to send to Shazam
+  clip_seconds: 5.0
+  # Re-identify at most this often while unlocked
+  min_interval_seconds: 12.0
+  # Identify automatically on MUSIC enter and after GAP→MUSIC
+  auto_on_music: true
+  # Skip network Shazam when false (fixture tests / offline)
+  use_shazam: true
+
+sync:
+  # Extra offset applied later for lyrics/position (Phase 4). Exposed as MQTT number now.
+  offset_ms: 0
+
+logging:
+  level: INFO

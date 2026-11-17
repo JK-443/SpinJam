@@ -1,0 +1,20 @@
+[Unit]
+Description=SpinJam vinyl capture / recognition node
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=audio
+WorkingDirectory=/opt/spinjam
+ExecStart=/opt/spinjam/.venv/bin/spinjam -c /opt/spinjam/config.yaml
+Restart=on-failure
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+# Keep memory footprint predictable on Pi Zero 2 W
+MemoryMax=200M
+
+[Install]
+WantedBy=multi-user.target
