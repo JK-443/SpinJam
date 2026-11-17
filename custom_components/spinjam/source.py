@@ -112,11 +112,15 @@ def select_active_source(
 ) -> ActiveSource | None:
     """Pick the active now-playing source.
 
-    Priority list order wins among candidates that are playing (or paused with
-    metadata). Sonos/Port Line-in defers to the vinyl entity when configured.
+    Candidates are sources that are playing, or paused with metadata.
+    Ranking: any playing source beats any paused source; within the same
+    play/pause tier, config list order wins (then recency). Paused wins only
+    when nothing is playing. Sonos/Port Line-in defers to the vinyl entity
+    when configured.
     """
     by_id = {snap.entity_id: snap for snap in snapshots}
-    candidates: list[tuple[int, datetime, SourceSnapshot, str]] = []
+    # (not_playing, priority_index, -recency, snap, kind)
+    candidates: list[tuple[bool, int, float, SourceSnapshot, str]] = []
 
     for index, entity_id in enumerate(priority):
         snap = by_id.get(entity_id)
@@ -150,21 +154,21 @@ def select_active_source(
                 continue
 
         recency = effective.position_updated_at or effective.last_changed or datetime.fromtimestamp(0, tz=timezone.utc)
-        candidates.append((index, recency, effective, kind))
+        not_playing = effective.state != "playing"
+        candidates.append((not_playing, index, -recency.timestamp(), effective, kind))
 
     # Also consider vinyl if not already in priority but configured and playing
     if vinyl_entity_id and vinyl_entity_id not in priority and vinyl_entity_id in by_id:
         snap = by_id[vinyl_entity_id]
         if snap.state == "playing" and (snap.title or snap.artist):
             recency = snap.position_updated_at or snap.last_changed or datetime.fromtimestamp(0, tz=timezone.utc)
-            candidates.append((len(priority) + 1, recency, snap, SOURCE_KIND_VINYL))
+            candidates.append((False, len(priority) + 1, -recency.timestamp(), snap, SOURCE_KIND_VINYL))
 
     if not candidates:
         return None
 
-    # Lower priority index wins; among equal index (shouldn't happen), newest recency
-    candidates.sort(key=lambda item: (item[0], -item[1].timestamp()))
-    _prio, _rec, snap, kind = candidates[0]
+    candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+    _paused, _prio, _rec, snap, kind = candidates[0]
     position = estimate_position(
         media_position=snap.position,
         media_position_updated_at=snap.position_updated_at,
