@@ -70,9 +70,13 @@ cards:
 [`docs/lovelace/spinjam.yaml`](lovelace/spinjam.yaml) (copy into your config
 and reference it from `lovelace:` / dashboards config).
 
-The card JS is auto-registered at `/spinjam/spinjam-lyrics-card.js?v=<hash>`.
-Cast receivers cache Lovelace resources for the session — when the card hash
-changes, `spinjam.start` quits the Cast app before casting so the new JS loads.
+The card JS is registered as a **Lovelace module resource** at
+`/spinjam/spinjam-lyrics-card.js?v=<hash>` (storage mode; YAML mode needs a
+manual resource) and the same URL is passed to `add_extra_js_url` so browsers
+don’t load two copies. Cast receivers only see Lovelace resources — without
+that registration the TV card stays blank. Cast also caches resources for the
+session; when the card hash changes, `spinjam.start` quits the Cast app before
+casting so the new JS loads.
 
 ### 3. Configure SpinJam displays
 
@@ -84,6 +88,7 @@ Settings → Devices & services → SpinJam → Configure:
 - **Cast view path:** `now` (default)
 - **Re-cast while playing:** on (default) — recovers dropped Cast sessions
 - **Recast on startup:** off (default). Cast sessions do not survive HA restart; leave this off unless you want SpinJam to call start again when the Cast switch was previously on.
+- **Power off display when stopping:** off (default). `media_player.turn_off` on the Cast entity quits the app but usually leaves a Chromecast-built-in TV on; enable this to also power off via the device’s `remote.*` entity when available.
 - **Lyric display offset (ms):** positive = lyrics appear **later** (see below)
 
 ## Entities
@@ -91,8 +96,8 @@ Settings → Devices & services → SpinJam → Configure:
 | Entity | Behaviour |
 | --- | --- |
 | `select.spinjam_display` | Which configured display to use |
-| `switch.spinjam_cast` | On → same as `spinjam.start`; off → `spinjam.stop`. State = active SpinJam cast session (also clears if the display goes off/unavailable while built-in casting is on). |
-| `switch.spinjam_tracking` | Off pauses source following and the ~1 s poll; now-playing **holds** last metadata (does not clear). **Does not** stop an active Cast. Restored across restarts; defaults to on. |
+| `switch.spinjam_cast` (**master on/off**) | On → wake display if needed, cast Lovelace, enable tracking (`spinjam.start`). Off → quit Cast app, disable tracking, clear now-playing to idle (`spinjam.stop`). Preferred daily toggle. |
+| `switch.spinjam_tracking` | Off pauses polling and clears now-playing; if Cast is active it also stops Cast. On resumes tracking only (does **not** start Cast). Restored across restarts; defaults to on. |
 | `number.spinjam_lyric_offset` | Lyric display offset in ms (**positive = lyrics later**). Live — no reload. Restored. Range −5000…5000, step 50. The TV card reads this by default via `offset_entity`. |
 
 ## Usage
@@ -182,8 +187,9 @@ Cast renders at **1080p** even on 4K TVs; the layout is tuned for that.
 
 ## Stop behaviour
 
-`spinjam.stop` calls `media_player.turn_off` on the active Cast entity. That
-ends the Cast session on Google TV / Chromecast without needing Browser Mod.
+`spinjam.stop` calls `media_player.turn_off` on the active Cast entity (quits
+the Lovelace/Cast app; the TV panel usually stays on). Optional **power off
+display when stopping** uses the paired `remote.*` entity when present.
 
 ## Known limitations
 

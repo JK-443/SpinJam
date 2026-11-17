@@ -26,6 +26,7 @@ from custom_components.spinjam.const import (
     CONF_DISPLAYS,
     CONF_LYRIC_OFFSET_MS,
     CONF_LYRICS_ENABLED,
+    CONF_POWER_OFF_DISPLAY_ON_STOP,
     CONF_RECAST_INTERVAL,
     CONF_RECAST_ON_STARTUP,
     CONF_RECAST_WHILE_PLAYING,
@@ -67,6 +68,7 @@ def test_options_schema_serializes_with_existing_entry_defaults() -> None:
         CONF_RECAST_WHILE_PLAYING: True,
         CONF_RECAST_INTERVAL: 45,
         CONF_RECAST_ON_STARTUP: False,
+        CONF_POWER_OFF_DISPLAY_ON_STOP: False,
     }
     _assert_serializable(_schema(defaults, options=True))
 
@@ -122,6 +124,7 @@ async def test_options_invalid_dashboard_path_returns_field_error(
             CONF_RECAST_WHILE_PLAYING: True,
             CONF_RECAST_INTERVAL: 45,
             CONF_RECAST_ON_STARTUP: False,
+            CONF_POWER_OFF_DISPLAY_ON_STOP: False,
         }
     )
     assert result["type"] == FlowResultType.FORM

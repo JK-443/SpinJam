@@ -43,7 +43,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = SpinJamCoordinator(hass, entry)
     await coordinator.async_setup()
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    domain_data[entry.entry_id] = coordinator
+    # Snapshot options so the update listener can skip offset-only persists.
+    domain_data[f"{entry.entry_id}_options"] = dict(entry.options)
     await hass.config_entries.async_forward_entry_setups(
         entry,
         [Platform.MEDIA_PLAYER, Platform.SELECT, Platform.SWITCH, Platform.NUMBER],
@@ -102,6 +105,25 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload on real options changes; skip lyric/sync offset-only persists."""
+    from .const import LIVE_OPTIONS_KEYS
+
+    domain_data = hass.data.get(DOMAIN) or {}
+    snap_key = f"{entry.entry_id}_options"
+    previous = domain_data.get(snap_key)
+    current = dict(entry.options)
+    domain_data[snap_key] = current
+    if previous is not None:
+        changed = {
+            key
+            for key in set(previous) | set(current)
+            if previous.get(key) != current.get(key)
+        }
+        if changed and changed.issubset(LIVE_OPTIONS_KEYS):
+            _LOGGER.debug(
+                "Skipping SpinJam reload for live offset options: %s", changed
+            )
+            return
     await hass.config_entries.async_reload(entry.entry_id)
 
 

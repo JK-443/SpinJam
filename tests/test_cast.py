@@ -63,11 +63,23 @@ async def test_start_casts_lovelace_view(hass: HomeAssistant) -> None:
     events: list[dict] = []
     hass.bus.async_listen(EVENT_SPINJAM_START, lambda e: events.append(e.data))
 
-    with patch(
-        "custom_components.spinjam.coordinator.async_show_now_playing",
-        new_callable=AsyncMock,
-        return_value=True,
-    ) as show:
+    with (
+        patch(
+            "custom_components.spinjam.coordinator.async_wake_display",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch(
+            "custom_components.spinjam.coordinator.async_show_now_playing",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as show,
+        patch(
+            "custom_components.spinjam.coordinator.async_wait_for_lovelace_app",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+    ):
         target = await coordinator.async_start("media_player.example_tv")
         await hass.async_block_till_done()
 
@@ -207,15 +219,26 @@ async def test_cast_quits_when_card_version_changes(hass: HomeAssistant) -> None
             return_value=True,
         ) as end,
         patch(
+            "custom_components.spinjam.coordinator.async_wake_display",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch(
             "custom_components.spinjam.coordinator.async_show_now_playing",
             new_callable=AsyncMock,
             return_value=True,
         ) as show,
+        patch(
+            "custom_components.spinjam.coordinator.async_wait_for_lovelace_app",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
     ):
-        await coordinator._async_cast_lovelace_view(  # noqa: SLF001
+        ok = await coordinator._async_cast_lovelace_view(  # noqa: SLF001
             display, dashboard_path="spinjam-tv", view_path="now"
         )
 
+    assert ok is True
     end.assert_awaited_once_with(hass, display)
     show.assert_awaited_once()
     assert coordinator._cast_card_version_by_display[display] == "newhash"  # noqa: SLF001
@@ -232,7 +255,17 @@ async def test_cast_quits_when_card_version_changes(hass: HomeAssistant) -> None
             return_value=True,
         ) as end2,
         patch(
+            "custom_components.spinjam.coordinator.async_wake_display",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch(
             "custom_components.spinjam.coordinator.async_show_now_playing",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch(
+            "custom_components.spinjam.coordinator.async_wait_for_lovelace_app",
             new_callable=AsyncMock,
             return_value=True,
         ),
@@ -281,6 +314,7 @@ async def test_options_schema_includes_cast_fields() -> None:
             "recast_while_playing": True,
             "recast_interval": 45,
             "recast_on_startup": False,
+            "power_off_display_on_stop": False,
         }
     )
     assert data[CONF_DASHBOARD_PATH] == "spinjam-tv"

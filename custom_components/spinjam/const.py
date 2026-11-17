@@ -19,6 +19,7 @@ CONF_RECAST_WHILE_PLAYING = "recast_while_playing"
 CONF_RECAST_INTERVAL = "recast_interval"
 CONF_BUILTIN_CASTING = "builtin_casting"
 CONF_RECAST_ON_STARTUP = "recast_on_startup"
+CONF_POWER_OFF_DISPLAY_ON_STOP = "power_off_display_on_stop"
 
 DEFAULT_NAME = "SpinJam Now Playing"
 DEFAULT_SYNC_OFFSET_MS = 0
@@ -32,6 +33,17 @@ DEFAULT_RECAST_WHILE_PLAYING = True
 DEFAULT_RECAST_INTERVAL = 45.0
 DEFAULT_BUILTIN_CASTING = True
 DEFAULT_RECAST_ON_STARTUP = False
+DEFAULT_POWER_OFF_DISPLAY_ON_STOP = False
+
+# Options keys that can change live without reloading the config entry.
+LIVE_OPTIONS_KEYS = frozenset({CONF_SYNC_OFFSET_MS, CONF_LYRIC_OFFSET_MS})
+
+# Cast media_player.app_name when the HA Lovelace receiver is running.
+LOVELACE_APP_NAMES = frozenset({"Home Assistant Lovelace"})
+
+CAST_WAKE_TIMEOUT_SEC = 10.0
+CAST_LOVELACE_TIMEOUT_SEC = 15.0
+CAST_LAUNCH_GRACE_SEC = 20.0
 
 ATTR_LYRIC_CURRENT = "lyric_current"
 ATTR_LYRIC_NEXT = "lyric_next"

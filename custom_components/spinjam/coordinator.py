@@ -8,14 +8,21 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_OFF, STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .cast import async_end_cast, async_show_now_playing, cast_options
+from .cast import (
+    async_end_cast,
+    async_power_off_display,
+    async_show_now_playing,
+    async_wait_for_lovelace_app,
+    async_wake_display,
+    cast_options,
+)
 from .cast_entities import cast_platform_status
 from .const import (
     ATTR_ALBUM_LOCK,
@@ -26,12 +33,14 @@ from .const import (
     ATTR_LYRIC_OFFSET_MS,
     ATTR_SELECTED_DISPLAY,
     ATTR_SYNC_OFFSET_MS,
+    CAST_LAUNCH_GRACE_SEC,
     CONF_BUILTIN_CASTING,
     CONF_DASHBOARD_PATH,
     CONF_DISPLAY_ENTITY,
     CONF_DISPLAYS,
     CONF_LYRIC_OFFSET_MS,
     CONF_LYRICS_ENABLED,
+    CONF_POWER_OFF_DISPLAY_ON_STOP,
     CONF_RECAST_INTERVAL,
     CONF_RECAST_WHILE_PLAYING,
     CONF_SOURCE_PLAYERS,
@@ -42,11 +51,13 @@ from .const import (
     DEFAULT_BUILTIN_CASTING,
     DEFAULT_LYRIC_OFFSET_MS,
     DEFAULT_LYRICS_ENABLED,
+    DEFAULT_POWER_OFF_DISPLAY_ON_STOP,
     DEFAULT_SYNC_OFFSET_MS,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     EVENT_SPINJAM_START,
     EVENT_SPINJAM_STOP,
+    LOVELACE_APP_NAMES,
     MQTT_CMD_CLEAR,
     MQTT_CMD_IDENTIFY,
     MQTT_CMD_SELECT_ALBUM,
@@ -62,9 +73,6 @@ if TYPE_CHECKING:
     from .switch import SpinJamCastSwitch, SpinJamTrackingSwitch
 
 _LOGGER = logging.getLogger(__name__)
-
-# Display states that mean the Cast session is gone.
-_CAST_ENDED_STATES = frozenset({STATE_OFF, STATE_UNAVAILABLE, STATE_UNKNOWN, "standby"})
 
 
 @dataclass
@@ -117,8 +125,10 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         self._unsub_cast_display: Any = None
         self._tracking_enabled = True
         self._ending_cast = False
+        self._cast_launch_until: datetime | None = None
         # Last SpinJam card JS version cast to each display (Cast caches resources).
         self._cast_card_version_by_display: dict[str, str] = {}
+        self._last_publish_fingerprint: tuple[Any, ...] | None = None
 
     def _client(self) -> LrcLibClient:
         if self._lyrics_client is None:
@@ -160,11 +170,19 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
 
     @property
     def lyric_offset_ms(self) -> int:
-        return int(self._options().get(CONF_LYRIC_OFFSET_MS, DEFAULT_LYRIC_OFFSET_MS))
+        return int(self.data.lyric_offset_ms)
 
     @property
     def builtin_casting(self) -> bool:
         return bool(self._options().get(CONF_BUILTIN_CASTING, DEFAULT_BUILTIN_CASTING))
+
+    @property
+    def power_off_display_on_stop(self) -> bool:
+        return bool(
+            self._options().get(
+                CONF_POWER_OFF_DISPLAY_ON_STOP, DEFAULT_POWER_OFF_DISPLAY_ON_STOP
+            )
+        )
 
     @property
     def cast_active(self) -> bool:
@@ -222,27 +240,76 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             snaps.append(snapshot_from_state(entity_id, state.state, attrs))
         return snaps
 
+    def _idle_data(self, *, tracking_enabled: bool | None = None) -> SpinJamData:
+        return SpinJamData(
+            active=None,
+            lyric_current=None,
+            lyric_next=None,
+            lyric_lines=None,
+            lyrics=None,
+            album_lock=self.data.album_lock if self.data else None,
+            sync_offset_ms=self.data.sync_offset_ms if self.data else 0,
+            lyric_offset_ms=self.data.lyric_offset_ms if self.data else 0,
+            position_updated_at=None,
+            tracking_enabled=(
+                self._tracking_enabled if tracking_enabled is None else tracking_enabled
+            ),
+            cast_active=self._cast_active,
+        )
+
+    def _data_fingerprint(self, data: SpinJamData) -> tuple[Any, ...]:
+        active = data.active
+        return (
+            None
+            if active is None
+            else (
+                active.entity_id,
+                active.playing,
+                active.title,
+                active.artist,
+                active.album,
+                active.art_url,
+                active.duration,
+                active.position,
+                active.kind,
+            ),
+            data.lyric_current,
+            data.lyric_next,
+            None if data.lyric_lines is None else len(data.lyric_lines),
+            data.sync_offset_ms,
+            data.lyric_offset_ms,
+            data.album_lock,
+            data.tracking_enabled,
+            data.cast_active,
+            # Only fingerprint position clock when we have a media_position.
+            data.position_updated_at if active and active.position is not None else None,
+            self.selected_display,
+            tuple(self.displays),
+        )
+
+    def _publish_data(self, data: SpinJamData) -> SpinJamData:
+        """Publish coordinator data only when the public fingerprint changes."""
+        fingerprint = self._data_fingerprint(data)
+        if fingerprint == self._last_publish_fingerprint and self.data is not None:
+            return self.data
+        self._last_publish_fingerprint = fingerprint
+        return data
+
     async def _async_update_data(self) -> SpinJamData:
-        # Tracking off: hold last snapshot (do not clear, do not re-poll sources).
+        # Tracking off: idle / no metadata (avoid stale "playing").
         if not self._tracking_enabled:
-            held = self.data
-            return SpinJamData(
-                active=held.active,
-                lyric_current=held.lyric_current,
-                lyric_next=held.lyric_next,
-                lyric_lines=held.lyric_lines,
-                lyrics=held.lyrics,
-                album_lock=held.album_lock,
-                sync_offset_ms=held.sync_offset_ms,
-                lyric_offset_ms=held.lyric_offset_ms,
-                position_updated_at=held.position_updated_at,
-                tracking_enabled=False,
-                cast_active=self._cast_active,
-            )
+            return self._publish_data(self._idle_data(tracking_enabled=False))
 
         options = self._options()
-        sync_offset = int(options.get(CONF_SYNC_OFFSET_MS, self.data.sync_offset_ms))
-        lyric_offset = int(options.get(CONF_LYRIC_OFFSET_MS, DEFAULT_LYRIC_OFFSET_MS))
+        # Prefer live in-memory offsets (options persist without reload).
+        sync_offset = int(self.data.sync_offset_ms)
+        lyric_offset = int(self.data.lyric_offset_ms)
+        # Keep in sync if options were changed via the UI (after a real reload).
+        if CONF_SYNC_OFFSET_MS in options:
+            sync_offset = int(options.get(CONF_SYNC_OFFSET_MS, sync_offset))
+        if CONF_LYRIC_OFFSET_MS in options:
+            lyric_offset = int(options.get(CONF_LYRIC_OFFSET_MS, lyric_offset))
+
         active = select_active_source(
             self._collect_snapshots(),
             priority=self.source_players,
@@ -289,27 +356,53 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         if self.display_select is not None:
             self.display_select._sync_options_from_coordinator()  # noqa: SLF001
 
-        return SpinJamData(
-            active=active,
-            lyric_current=lyric_current,
-            lyric_next=lyric_next,
-            lyric_lines=lyric_lines,
-            lyrics=lyrics,
-            album_lock=self.data.album_lock,
-            sync_offset_ms=sync_offset,
-            lyric_offset_ms=lyric_offset,
-            position_updated_at=datetime.now(timezone.utc) if active else None,
-            tracking_enabled=True,
-            cast_active=self._cast_active,
+        # Only refresh the position clock when the source exposes media_position.
+        # Sources like TV audio would otherwise force a state write every second.
+        if active and active.position is not None:
+            position_updated_at = datetime.now(timezone.utc)
+        elif active:
+            prev = self.data.active if self.data else None
+            same_track = (
+                prev is not None
+                and prev.entity_id == active.entity_id
+                and prev.title == active.title
+                and prev.artist == active.artist
+            )
+            position_updated_at = (
+                self.data.position_updated_at if same_track else None
+            )
+        else:
+            position_updated_at = None
+
+        return self._publish_data(
+            SpinJamData(
+                active=active,
+                lyric_current=lyric_current,
+                lyric_next=lyric_next,
+                lyric_lines=lyric_lines,
+                lyrics=lyrics,
+                album_lock=self.data.album_lock,
+                sync_offset_ms=sync_offset,
+                lyric_offset_ms=lyric_offset,
+                position_updated_at=position_updated_at,
+                tracking_enabled=True,
+                cast_active=self._cast_active,
+            )
         )
 
-    async def async_set_tracking(self, enabled: bool) -> None:
+    async def async_set_tracking(
+        self, enabled: bool, *, from_cast_stop: bool = False
+    ) -> None:
         """Enable or pause source following / coordinator polling.
 
-        When off, ``media_player.spinjam_now_playing`` **holds** its last
-        metadata (does not clear). Cast sessions are left alone.
+        Tracking off while a Cast session is active also stops Cast (master
+        linkage). Tracking on does **not** start Cast. When off, now-playing
+        clears to idle (no stale metadata).
         """
         enabled = bool(enabled)
+        if not enabled and self._cast_active and not from_cast_stop:
+            await self.async_stop()
+            return
         if self._tracking_enabled == enabled:
             return
         self._tracking_enabled = enabled
@@ -323,7 +416,25 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
                 self._unsub_state()
                 self._unsub_state = None
             self._tracked = []
-            # Push held snapshot so attributes expose tracking_enabled=False.
+            self._last_lyrics_key = None
+            self.async_set_updated_data(self._idle_data(tracking_enabled=False))
+            self._last_publish_fingerprint = self._data_fingerprint(self.data)
+        if self.tracking_switch is not None and self.tracking_switch.hass is not None:
+            self.tracking_switch.async_write_ha_state()
+
+    def _persist_live_option(self, key: str, value: int) -> None:
+        """Write an offset into options without triggering a full reload."""
+        options = {**self.entry.options, key: value}
+        self.hass.config_entries.async_update_entry(self.entry, options=options)
+
+    async def async_set_sync_offset(self, offset_ms: int) -> None:
+        offset_ms = max(-2000, min(2000, int(offset_ms)))
+        self.data.sync_offset_ms = offset_ms
+        self._persist_live_option(CONF_SYNC_OFFSET_MS, offset_ms)
+        await self._async_mqtt_publish(MQTT_CMD_SYNC_OFFSET, str(offset_ms))
+        if self._tracking_enabled:
+            await self.async_request_refresh()
+        else:
             self.async_set_updated_data(
                 SpinJamData(
                     active=self.data.active,
@@ -332,56 +443,46 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
                     lyric_lines=self.data.lyric_lines,
                     lyrics=self.data.lyrics,
                     album_lock=self.data.album_lock,
-                    sync_offset_ms=self.data.sync_offset_ms,
+                    sync_offset_ms=offset_ms,
                     lyric_offset_ms=self.data.lyric_offset_ms,
                     position_updated_at=self.data.position_updated_at,
-                    tracking_enabled=False,
+                    tracking_enabled=self.data.tracking_enabled,
                     cast_active=self._cast_active,
                 )
             )
-        if self.tracking_switch is not None and self.tracking_switch.hass is not None:
-            self.tracking_switch.async_write_ha_state()
-
-    async def async_set_sync_offset(self, offset_ms: int) -> None:
-        self.data.sync_offset_ms = int(offset_ms)
-        options = {**self.entry.options, CONF_SYNC_OFFSET_MS: int(offset_ms)}
-        self.hass.config_entries.async_update_entry(self.entry, options=options)
-        await self._async_mqtt_publish(MQTT_CMD_SYNC_OFFSET, str(offset_ms))
-        if self._tracking_enabled:
-            await self.async_request_refresh()
 
     async def async_set_lyric_offset(self, offset_ms: int) -> None:
         """Set lyric display offset (ms; positive = lyrics later). Live, no reload."""
         offset_ms = max(-5000, min(5000, int(offset_ms)))
         self.data.lyric_offset_ms = offset_ms
-        options = {**self.entry.options, CONF_LYRIC_OFFSET_MS: offset_ms}
-        self.hass.config_entries.async_update_entry(self.entry, options=options)
+        self._persist_live_option(CONF_LYRIC_OFFSET_MS, offset_ms)
         if self.lyric_offset_number is not None and self.lyric_offset_number.hass:
             self.lyric_offset_number._attr_native_value = float(offset_ms)  # noqa: SLF001
             self.lyric_offset_number.async_write_ha_state()
-        if self._tracking_enabled:
-            await self.async_request_refresh()
-        else:
-            # Still refresh lyric_current against held position when tracking is paused.
-            held = self.data
-            if held.lyrics and held.active and held.active.position is not None:
-                lyric_pos = max(0.0, held.active.position - (offset_ms / 1000.0))
-                cur, nxt = line_at(held.lyrics.lines, lyric_pos)
-                self.async_set_updated_data(
-                    SpinJamData(
-                        active=held.active,
-                        lyric_current=cur,
-                        lyric_next=nxt,
-                        lyric_lines=held.lyric_lines,
-                        lyrics=held.lyrics,
-                        album_lock=held.album_lock,
-                        sync_offset_ms=held.sync_offset_ms,
-                        lyric_offset_ms=offset_ms,
-                        position_updated_at=held.position_updated_at,
-                        tracking_enabled=held.tracking_enabled,
-                        cast_active=self._cast_active,
-                    )
-                )
+
+        held = self.data
+        lyric_current = held.lyric_current
+        lyric_next = held.lyric_next
+        if held.lyrics and held.active and held.active.position is not None:
+            lyric_pos = max(0.0, held.active.position - (offset_ms / 1000.0))
+            lyric_current, lyric_next = line_at(held.lyrics.lines, lyric_pos)
+
+        self.async_set_updated_data(
+            SpinJamData(
+                active=held.active,
+                lyric_current=lyric_current,
+                lyric_next=lyric_next,
+                lyric_lines=held.lyric_lines,
+                lyrics=held.lyrics,
+                album_lock=held.album_lock,
+                sync_offset_ms=held.sync_offset_ms,
+                lyric_offset_ms=offset_ms,
+                position_updated_at=held.position_updated_at,
+                tracking_enabled=held.tracking_enabled,
+                cast_active=self._cast_active,
+            )
+        )
+        self._last_publish_fingerprint = self._data_fingerprint(self.data)
 
     async def async_identify(self) -> None:
         await self._async_mqtt_publish(MQTT_CMD_IDENTIFY, "press")
@@ -399,7 +500,7 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             await self.async_request_refresh()
 
     async def async_start(self, display: str | None = None) -> str:
-        """Select a display, optionally cast, and fire ``spinjam_start``."""
+        """Select a display, cast (master on), enable tracking, fire ``spinjam_start``."""
         configured = self.displays
         if not configured:
             raise ServiceValidationError(
@@ -415,6 +516,9 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         else:
             self.selected_display = target
 
+        # Casting always enables tracking (master on).
+        await self.async_set_tracking(True)
+
         opts = cast_options(self._options())
         do_builtin = self.builtin_casting
         if do_builtin:
@@ -426,24 +530,33 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
                     target,
                 )
                 do_builtin = False
+
         if do_builtin:
-            await self._async_cast_lovelace_view(
+            ok = await self._async_cast_lovelace_view(
                 target,
                 dashboard_path=str(opts[CONF_DASHBOARD_PATH]),
                 view_path=str(opts[CONF_VIEW_PATH]),
             )
+            if not ok:
+                _LOGGER.warning(
+                    "SpinJam cast to %s failed — leaving switch.spinjam_cast off",
+                    target,
+                )
+                self._async_set_cast_active(False)
+                if self.cast_switch is not None and self.cast_switch.hass is not None:
+                    self.cast_switch.async_write_ha_state()
+                return target
             self._async_schedule_recast(opts)
         else:
             self._async_stop_recast()
 
         self._async_set_cast_active(True, target)
         self.hass.bus.async_fire(EVENT_SPINJAM_START, {"display": target})
-        if self._tracking_enabled:
-            await self.async_request_refresh()
+        await self.async_request_refresh()
         return target
 
     async def async_stop(self) -> None:
-        """End the logical Cast session and fire ``spinjam_stop``."""
+        """End Cast, stop recast, disable tracking, and clear now-playing."""
         self._async_stop_recast()
         display = self._cast_display or self.selected_display
         was_active = self._cast_active
@@ -456,9 +569,17 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
                 and cast_platform_status(self.hass, display) != "not_cast"
             ):
                 await async_end_cast(self.hass, display)
+                if self.power_off_display_on_stop:
+                    await async_power_off_display(self.hass, display)
             self._async_set_cast_active(False)
         finally:
             self._ending_cast = False
+
+        await self.async_set_tracking(False, from_cast_stop=True)
+        self._last_lyrics_key = None
+        self.async_set_updated_data(self._idle_data(tracking_enabled=False))
+        self._last_publish_fingerprint = self._data_fingerprint(self.data)
+
         payload: dict[str, Any] = {}
         if display:
             payload["display"] = display
@@ -472,10 +593,16 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         else:
             self._async_unwatch_cast_display()
             self._cast_display = None
+            self._cast_launch_until = None
         if self.data is not None:
             self.data.cast_active = active
         if self.cast_switch is not None and self.cast_switch.hass is not None:
             self.cast_switch.async_write_ha_state()
+
+    def _mark_cast_launch(self) -> None:
+        self._cast_launch_until = datetime.now(timezone.utc) + timedelta(
+            seconds=CAST_LAUNCH_GRACE_SEC
+        )
 
     def _async_watch_cast_display(self) -> None:
         self._async_unwatch_cast_display()
@@ -489,14 +616,25 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             new_state = event.data.get("new_state")
             if new_state is None:
                 return
-            if new_state.state in _CAST_ENDED_STATES:
+            # Ignore brief off/standby flaps while the Cast app (re)launches.
+            now = datetime.now(timezone.utc)
+            if self._cast_launch_until and now < self._cast_launch_until:
+                return
+            if new_state.state == STATE_UNAVAILABLE:
                 _LOGGER.debug(
-                    "Cast display %s became %s — clearing SpinJam cast session",
+                    "Cast display %s unavailable — clearing SpinJam cast session",
                     self._cast_display,
-                    new_state.state,
                 )
-                self._async_stop_recast()
-                self._async_set_cast_active(False)
+                self.hass.async_create_task(self.async_stop())
+                return
+            app = new_state.attributes.get("app_name")
+            if app and str(app) not in LOVELACE_APP_NAMES:
+                _LOGGER.debug(
+                    "Cast display %s app_name=%s — ending SpinJam session",
+                    self._cast_display,
+                    app,
+                )
+                self.hass.async_create_task(self.async_stop())
 
         self._unsub_cast_display = async_track_state_change_event(
             self.hass, [self._cast_display], _on_display
@@ -533,11 +671,13 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         if active is None or not active.playing:
             return
         opts = cast_options(self._options())
-        await self._async_cast_lovelace_view(
+        ok = await self._async_cast_lovelace_view(
             self._cast_display,
             dashboard_path=str(opts[CONF_DASHBOARD_PATH]),
             view_path=str(opts[CONF_VIEW_PATH]),
         )
+        if not ok:
+            _LOGGER.warning("SpinJam re-cast to %s failed", self._cast_display)
 
     async def _async_cast_lovelace_view(
         self,
@@ -545,12 +685,8 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         *,
         dashboard_path: str,
         view_path: str,
-    ) -> None:
-        """Cast the Lovelace view, quitting the receiver first when card JS changed.
-
-        Cast receivers load Lovelace resources once per session (``resourcesLoaded``),
-        so a plain re-cast will not pick up a new ``spinjam-lyrics-card.js``.
-        """
+    ) -> bool:
+        """Wake, cast, and verify Lovelace — quit first when card JS changed."""
         version = card_file_hash()
         last = self._cast_card_version_by_display.get(entity_id)
         if last is not None and last != version:
@@ -561,13 +697,27 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
                 entity_id,
             )
             await async_end_cast(self.hass, entity_id)
-        await async_show_now_playing(
+
+        self._mark_cast_launch()
+        if not await async_wake_display(self.hass, entity_id):
+            return False
+
+        shown = await async_show_now_playing(
             self.hass,
             entity_id=entity_id,
             dashboard_path=dashboard_path,
             view_path=view_path,
+            blocking=True,
         )
+        if not shown:
+            return False
+
+        if not await async_wait_for_lovelace_app(self.hass, entity_id):
+            return False
+
         self._cast_card_version_by_display[entity_id] = version
+        self._mark_cast_launch()
+        return True
 
     async def _async_mqtt_publish(self, topic: str, payload: str) -> None:
         try:

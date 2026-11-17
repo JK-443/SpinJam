@@ -59,6 +59,43 @@ class SpinJamMediaPlayer(CoordinatorEntity[SpinJamCoordinator], MediaPlayerEntit
             "manufacturer": "SpinJam",
             "model": "now-playing",
         }
+        self._last_write_fingerprint: tuple[Any, ...] | None = None
+
+    def _write_fingerprint(self) -> tuple[Any, ...]:
+        data = self.coordinator.data
+        active = data.active
+        return (
+            self.state,
+            None
+            if active is None
+            else (
+                active.entity_id,
+                active.title,
+                active.artist,
+                active.album,
+                active.art_url,
+                active.duration,
+                active.position,
+                active.playing,
+            ),
+            data.lyric_current,
+            data.lyric_next,
+            data.sync_offset_ms,
+            data.lyric_offset_ms,
+            data.album_lock,
+            self.coordinator.tracking_enabled,
+            self.coordinator.cast_active,
+            self.coordinator.selected_display,
+            # Include position clock only when media_position is present.
+            data.position_updated_at if active and active.position is not None else None,
+        )
+
+    def _handle_coordinator_update(self) -> None:
+        fingerprint = self._write_fingerprint()
+        if fingerprint == self._last_write_fingerprint:
+            return
+        self._last_write_fingerprint = fingerprint
+        super()._handle_coordinator_update()
 
     @property
     def state(self) -> MediaPlayerState:
