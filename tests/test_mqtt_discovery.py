@@ -14,7 +14,7 @@ from spinjam.mqtt_ha import (
 def _config() -> AppConfig:
     return AppConfig(
         mqtt=MqttConfig(
-            host="192.168.4.10",
+            host="192.168.1.10",
             topic_prefix="spinjam",
             discovery_prefix="homeassistant",
             availability_topic="spinjam/status",

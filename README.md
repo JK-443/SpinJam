@@ -21,7 +21,7 @@ Vinyl Pi (Shazam → MQTT) ───────────────┘     
 
 When a configured Sonos/Port player’s source is **Line-in**, SpinJam uses the vinyl MQTT player instead of Port metadata.
 
-## Install the HA integration (Marc)
+## Install the HA integration
 
 ### Option A — HACS (custom repository)
 
@@ -31,7 +31,7 @@ When a configured Sonos/Port player’s source is **Line-in**, SpinJam uses the 
 4. Settings → Devices & services → Add Integration → **SpinJam**  
 5. Select source media players (priority order), e.g.:
    - `media_player.turntable` (Music Assistant)
-   - Sonos rooms (`media_player.media_room`, `kitchen`, …)
+   - Sonos rooms (`media_player.living_room`, `media_player.kitchen`, …)
    - Optional vinyl: `media_player.spinjam_turntable` (after the capture node is up)
 6. Enable lyrics; leave sync offset at `0` until you calibrate
 
@@ -69,7 +69,7 @@ pytest -q
 
 ## Roadmap
 
-- **Display:** Lovelace now-playing view cast to Bravia (`media_player.basement_tv`)
+- **Display:** Lovelace now-playing view cast to a TV (`media_player.living_room_tv`)
 - **Album lock:** Discogs tracklists + vinyl position confirm
 - **Polish:** art caching, scrobble
 

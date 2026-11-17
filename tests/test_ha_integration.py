@@ -86,7 +86,7 @@ async def test_coordinator_aggregates_stream_source(hass: HomeAssistant) -> None
 @pytest.mark.asyncio
 async def test_coordinator_line_in_uses_vinyl(hass: HomeAssistant) -> None:
     hass.states.async_set(
-        "media_player.unnamed_room",
+        "media_player.living_room_port",
         "playing",
         {"source": "Line-in"},
     )
@@ -103,7 +103,7 @@ async def test_coordinator_line_in_uses_vinyl(hass: HomeAssistant) -> None:
         unique_id=f"{DOMAIN}_vinyl",
         **{
             CONF_SOURCE_PLAYERS: [
-                "media_player.unnamed_room",
+                "media_player.living_room_port",
                 "media_player.spinjam_turntable",
             ],
             CONF_VINYL_PLAYER: "media_player.spinjam_turntable",

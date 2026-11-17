@@ -1,6 +1,6 @@
 # Fixture / file capture mode
 
-Marc is ordering a Behringer UCA202. Until it arrives, SpinJam can run end-to-end on any machine (including CI) using a WAV fixture.
+Until a Behringer UCA202 (or similar) is available, SpinJam can run end-to-end on any machine (including CI) using a WAV fixture.
 
 ## What it does
 
