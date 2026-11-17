@@ -35,8 +35,9 @@ start:
   name: Start SpinJam display
   description: >
     Select a configured display (or keep the current select.spinjam_display
-    choice), cast the SpinJam Lovelace view via cast.show_lovelace_view, and
-    fire spinjam_start. Requires a one-time dashboard (see docs/TV_CAST.md).
+    choice), fire spinjam_start, and — when built-in casting is enabled —
+    cast the Lovelace view via cast.show_lovelace_view. Same as turning on
+    switch.spinjam_cast. Requires a one-time dashboard (see docs/TV_CAST.md).
   fields:
     display:
       name: Display
@@ -49,5 +50,5 @@ start:
 stop:
   name: Stop SpinJam display
   description: >
-    End the Cast session with media_player.turn_off on the active display and
-    fire spinjam_stop.
+    End the SpinJam cast session (media_player.turn_off when built-in casting
+    is on) and fire spinjam_stop. Same as turning off switch.spinjam_cast.

@@ -12,21 +12,25 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
+    CONF_BUILTIN_CASTING,
     CONF_DASHBOARD_PATH,
     CONF_DISPLAYS,
     CONF_LYRIC_OFFSET_MS,
     CONF_LYRICS_ENABLED,
     CONF_RECAST_INTERVAL,
+    CONF_RECAST_ON_STARTUP,
     CONF_RECAST_WHILE_PLAYING,
     CONF_SOURCE_PLAYERS,
     CONF_SYNC_OFFSET_MS,
     CONF_VIEW_PATH,
     CONF_VINYL_PLAYER,
+    DEFAULT_BUILTIN_CASTING,
     DEFAULT_DASHBOARD_PATH,
     DEFAULT_LYRIC_OFFSET_MS,
     DEFAULT_LYRICS_ENABLED,
     DEFAULT_NAME,
     DEFAULT_RECAST_INTERVAL,
+    DEFAULT_RECAST_ON_STARTUP,
     DEFAULT_RECAST_WHILE_PLAYING,
     DEFAULT_SYNC_OFFSET_MS,
     DEFAULT_VIEW_PATH,
@@ -107,6 +111,10 @@ def _schema(defaults: dict[str, Any] | None = None, *, options: bool = False) ->
     )
     if options:
         fields[vol.Required(
+            CONF_BUILTIN_CASTING,
+            default=defaults.get(CONF_BUILTIN_CASTING, DEFAULT_BUILTIN_CASTING),
+        )] = bool
+        fields[vol.Required(
             CONF_DASHBOARD_PATH,
             default=defaults.get(CONF_DASHBOARD_PATH, DEFAULT_DASHBOARD_PATH),
         )] = str
@@ -124,6 +132,10 @@ def _schema(defaults: dict[str, Any] | None = None, *, options: bool = False) ->
             CONF_RECAST_INTERVAL,
             default=defaults.get(CONF_RECAST_INTERVAL, DEFAULT_RECAST_INTERVAL),
         )] = vol.All(vol.Coerce(float), vol.Range(min=15, max=300))
+        fields[vol.Required(
+            CONF_RECAST_ON_STARTUP,
+            default=defaults.get(CONF_RECAST_ON_STARTUP, DEFAULT_RECAST_ON_STARTUP),
+        )] = bool
     return vol.Schema(fields)
 
 

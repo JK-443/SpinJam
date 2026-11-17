@@ -17,6 +17,8 @@ CONF_DASHBOARD_PATH = "dashboard_path"
 CONF_VIEW_PATH = "view_path"
 CONF_RECAST_WHILE_PLAYING = "recast_while_playing"
 CONF_RECAST_INTERVAL = "recast_interval"
+CONF_BUILTIN_CASTING = "builtin_casting"
+CONF_RECAST_ON_STARTUP = "recast_on_startup"
 
 DEFAULT_NAME = "SpinJam Now Playing"
 DEFAULT_SYNC_OFFSET_MS = 0
@@ -27,6 +29,8 @@ DEFAULT_DASHBOARD_PATH = "spinjam"
 DEFAULT_VIEW_PATH = "now"
 DEFAULT_RECAST_WHILE_PLAYING = True
 DEFAULT_RECAST_INTERVAL = 45.0
+DEFAULT_BUILTIN_CASTING = True
+DEFAULT_RECAST_ON_STARTUP = False
 
 ATTR_LYRIC_CURRENT = "lyric_current"
 ATTR_LYRIC_NEXT = "lyric_next"
@@ -72,3 +76,5 @@ LRCLIB_API = "https://lrclib.net/api/get"
 LYRICS_CACHE_SIZE = 64
 
 SELECT_DISPLAY_ENTITY_ID = "select.spinjam_display"
+SWITCH_CAST_ENTITY_ID = "switch.spinjam_cast"
+SWITCH_TRACKING_ENTITY_ID = "switch.spinjam_tracking"

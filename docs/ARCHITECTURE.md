@@ -22,11 +22,12 @@ SpinJam is a **general now-playing system**. Vinyl is one source among Music Ass
 
 1. Config/options `displays` is an optional ordered list of `media_player` entities (e.g. `media_player.living_room_tv`).
 2. `select.spinjam_display` exposes those options; default is the first; last choice is restored after restart.
-3. `spinjam.start` (optional `display`) validates against the list, updates the select, calls `cast.show_lovelace_view` with configurable `dashboard_path` / `view_path` (defaults `spinjam` / `now`), and fires `spinjam_start`.
-4. Optional re-cast while playing recovers dropped Cast sessions.
-5. `spinjam.stop` ends Cast via `media_player.turn_off` and fires `spinjam_stop`.
-6. Legacy single `display_entity` config is migrated into a one-item `displays` list when present.
-7. The Lovelace dashboard/view is a **one-time manual setup** (integrations cannot reliably create dashboards in all HA modes). Card JS is served from the integration static path.
+3. `spinjam.start` / `switch.spinjam_cast` on (optional `display`) validates against the list, updates the select, and fires `spinjam_start`. When **built-in casting** is on (default), also calls `cast.show_lovelace_view` with configurable `dashboard_path` / `view_path` (defaults `spinjam` / `now`).
+4. Optional re-cast while playing recovers dropped Cast sessions; optional **recast on startup** (default off) re-starts Cast after HA restart if the Cast switch was on.
+5. `spinjam.stop` / Cast switch off ends Cast via `media_player.turn_off` when built-in casting is on, and always fires `spinjam_stop`. External Cast end (display off/unavailable) clears the logical session and the Cast switch.
+6. `switch.spinjam_tracking` (default on, RestoreEntity): off pauses source watchers and the ~1 s poll; now-playing **holds** the last snapshot. Tracking off does not stop Cast.
+7. Legacy single `display_entity` config is migrated into a one-item `displays` list when present.
+8. The Lovelace dashboard/view is a **one-time manual setup** (integrations cannot reliably create dashboards in all HA modes). Card JS is served from the integration static path.
 
 ## Memory constraints
 

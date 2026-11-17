@@ -2,7 +2,8 @@
 
 SpinJam casts a full-screen now-playing Lovelace view to a Google Cast /
 Google TV `media_player` (e.g. `media_player.living_room_tv`) when you call
-`spinjam.start`. `spinjam.stop` ends the session.
+`spinjam.start` or turn on `switch.spinjam_cast`. `spinjam.stop` / Cast switch
+off ends the session.
 
 Browser Mod and Fully Kiosk are **not** required.
 
@@ -46,12 +47,28 @@ and reference it from `lovelace:` / dashboards config).
 Settings → Devices & services → SpinJam → Configure:
 
 - **Displays:** e.g. `media_player.living_room_tv`
+- **Built-in casting:** on (default). When off, start/stop and `switch.spinjam_cast` only fire `spinjam_start` / `spinjam_stop` (no `cast.show_lovelace_view`) so you can cast from your own automations without double-casting. Events always fire either way.
 - **Cast dashboard path:** `spinjam` (default)
 - **Cast view path:** `now` (default)
 - **Re-cast while playing:** on (default) — recovers dropped Cast sessions
+- **Recast on startup:** off (default). Cast sessions do not survive HA restart; leave this off unless you want SpinJam to call start again when the Cast switch was previously on.
 - **Lyric display offset (ms):** fine-tune highlight timing (see below)
 
+## Switches
+
+| Entity | Behaviour |
+| --- | --- |
+| `select.spinjam_display` | Which configured display to use |
+| `switch.spinjam_cast` | On → same as `spinjam.start`; off → `spinjam.stop`. State = active SpinJam cast session (also clears if the display goes off/unavailable while built-in casting is on). |
+| `switch.spinjam_tracking` | Off pauses source following and the ~1 s poll; now-playing **holds** last metadata (does not clear). **Does not** stop an active Cast. Restored across restarts; defaults to on. |
+
 ## Usage
+
+```yaml
+service: switch.turn_on
+target:
+  entity_id: switch.spinjam_cast
+```
 
 ```yaml
 service: spinjam.start
@@ -61,6 +78,7 @@ data:
 
 ```yaml
 service: spinjam.stop
+# or switch.turn_off on switch.spinjam_cast
 ```
 
 ### Example: start when Port goes Line-in

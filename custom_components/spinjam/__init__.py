@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["media_player", "select"]
+PLATFORMS = ["media_player", "select", "switch"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -38,7 +38,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(
-        entry, [Platform.MEDIA_PLAYER, Platform.SELECT]
+        entry, [Platform.MEDIA_PLAYER, Platform.SELECT, Platform.SWITCH]
     )
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))

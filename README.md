@@ -49,7 +49,16 @@ Copy `custom_components/spinjam` into your HA `config/custom_components/spinjam`
 1. Ensure **Google Cast** is set up and HA has an HTTPS **External URL**.  
 2. Create a Lovelace dashboard path `spinjam` with a panel view path `now` using `custom:spinjam-now-playing-card` (full steps: [`docs/TV_CAST.md`](docs/TV_CAST.md)).  
 3. Configure SpinJam options: displays + dashboard/view paths (defaults match above).  
-4. Call `spinjam.start` / `spinjam.stop` (or automate on Port Line-in).
+4. Use `switch.spinjam_cast`, or `spinjam.start` / `spinjam.stop` (or automate on Port Line-in).
+
+### Switches
+
+| Entity | Role |
+| --- | --- |
+| `switch.spinjam_cast` | On = `spinjam.start` (selected `select.spinjam_display`); off = `spinjam.stop`. Tracks whether a SpinJam cast session is active. |
+| `switch.spinjam_tracking` | On (default) follows sources / polls; off **holds** the last now-playing snapshot (no polling). Leaving tracking off does **not** stop Cast. |
+
+Options: **Built-in casting** (default on) — when off, start/stop and the Cast switch only fire `spinjam_start` / `spinjam_stop` so you can cast from your own automations without double-casting. **Recast on startup** (default off) — only then will a previously-on Cast switch re-cast after an HA restart.
 
 ### Try it
 
@@ -57,7 +66,8 @@ Copy `custom_components/spinjam` into your HA `config/custom_components/spinjam`
 2. Open Developer Tools → States → `media_player.spinjam_now_playing`.  
 3. Confirm artist/title/album/art; with lyrics enabled, check `lyric_current` / `lyric_next` / `lyric_lines`.  
 4. Services: `spinjam.identify`, `spinjam.set_sync_offset`, `spinjam.select_album`, `spinjam.clear_lock`, `spinjam.start`, `spinjam.stop`.
-5. Attributes include `displays`, `selected_display`, `lyric_offset_ms`.
+5. Entities: `select.spinjam_display`, `switch.spinjam_cast`, `switch.spinjam_tracking`.
+6. Attributes include `displays`, `selected_display`, `lyric_offset_ms`, `tracking_enabled`, `cast_active`.
 
 ## Vinyl capture node (optional source)
 

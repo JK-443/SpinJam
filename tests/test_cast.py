@@ -200,10 +200,12 @@ async def test_options_schema_includes_cast_fields() -> None:
             "lyrics_enabled": True,
             "sync_offset_ms": 0,
             "lyric_offset_ms": 100,
+            "builtin_casting": True,
             "dashboard_path": "spinjam",
             "view_path": "now",
             "recast_while_playing": True,
             "recast_interval": 45,
+            "recast_on_startup": False,
         }
     )
     assert data[CONF_DASHBOARD_PATH] == "spinjam"
