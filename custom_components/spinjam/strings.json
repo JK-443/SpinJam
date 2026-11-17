@@ -21,7 +21,10 @@
     "error": {
       "no_sources": "Select at least one source media player.",
       "displays_not_cast": "Every display must be a Google Cast media_player (entity registry platform = cast).",
-      "invalid_dashboard_path": "Dashboard path must be a lowercase slug that contains a hyphen (e.g. spinjam-tv)."
+      "invalid_path": "Dashboard path must be a lowercase slug that contains a hyphen (e.g. spinjam-tv).",
+      "invalid_dashboard_path": "Dashboard path must be a lowercase slug that contains a hyphen (e.g. spinjam-tv).",
+      "invalid_sync_offset": "Playback sync offset must be between -2000 and 2000 ms.",
+      "invalid_lyric_offset": "Lyric display offset must be between -5000 and 5000 ms."
     }
   },
   "options": {
@@ -45,6 +48,15 @@
           "recast_on_startup": "Re-cast on Home Assistant restart if Cast was on"
         }
       }
+    },
+    "error": {
+      "no_sources": "Select at least one source media player.",
+      "displays_not_cast": "Every display must be a Google Cast media_player (entity registry platform = cast).",
+      "invalid_path": "Dashboard path must be a lowercase slug that contains a hyphen (e.g. spinjam-tv).",
+      "invalid_view_path": "View path is required.",
+      "invalid_sync_offset": "Playback sync offset must be between -2000 and 2000 ms.",
+      "invalid_lyric_offset": "Lyric display offset must be between -5000 and 5000 ms.",
+      "invalid_recast_interval": "Re-cast interval must be between 15 and 300 seconds."
     }
   },
   "services": {
