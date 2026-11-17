@@ -72,6 +72,7 @@ async def test_coordinator_aggregates_stream_source(hass: HomeAssistant) -> None
 
     with patch.object(SpinJamCoordinator, "_client", return_value=mock_client):
         coordinator = SpinJamCoordinator(hass, entry)
+        await coordinator.async_set_tracking(True)
         await coordinator.async_refresh()
 
     assert coordinator.data.active is not None
@@ -112,6 +113,7 @@ async def test_coordinator_line_in_uses_vinyl(hass: HomeAssistant) -> None:
     entry.add_to_hass(hass)
 
     coordinator = SpinJamCoordinator(hass, entry)
+    await coordinator.async_set_tracking(True)
     await coordinator.async_refresh()
     assert coordinator.data.active is not None
     assert coordinator.data.active.entity_id == "media_player.spinjam_turntable"

@@ -168,6 +168,7 @@ async def test_cast_failure_leaves_switch_off(hass: HomeAssistant) -> None:
         ),
     ):
         await coordinator.async_start()
+        await hass.async_block_till_done()
 
     assert coordinator.cast_active is False
     assert coordinator.tracking_enabled is True
@@ -185,6 +186,7 @@ async def test_cast_off_clears_tracking_and_idle(hass: HomeAssistant) -> None:
     entry.add_to_hass(hass)
     coordinator = SpinJamCoordinator(hass, entry)
     coordinator.selected_display = coordinator.displays[0]
+    await coordinator.async_set_tracking(True)
     await coordinator.async_refresh()
     assert coordinator.data.active is not None
 
@@ -200,6 +202,7 @@ async def test_cast_off_clears_tracking_and_idle(hass: HomeAssistant) -> None:
         ) as end,
     ):
         await coordinator.async_start()
+        await hass.async_block_till_done()
         assert coordinator.cast_active is True
         await coordinator.async_stop()
 
@@ -230,6 +233,7 @@ async def test_tracking_off_stops_cast(hass: HomeAssistant) -> None:
         ),
     ):
         await coordinator.async_start()
+        await hass.async_block_till_done()
         assert coordinator.cast_active is True
         await coordinator.async_set_tracking(False)
 
@@ -255,6 +259,7 @@ async def test_display_watcher_ignores_off_during_grace(hass: HomeAssistant) -> 
     wake, show, wait = _cast_success_patches()
     with wake, show, wait:
         await coordinator.async_start()
+        await hass.async_block_till_done()
     assert coordinator.cast_active is True
 
     hass.states.async_set("media_player.example_tv", STATE_OFF, {})
@@ -290,6 +295,7 @@ async def test_display_watcher_ends_on_other_app(hass: HomeAssistant) -> None:
     wake, show, wait = _cast_success_patches()
     with wake, show, wait:
         await coordinator.async_start()
+        await hass.async_block_till_done()
     coordinator._cast_launch_until = datetime.now(timezone.utc) - timedelta(seconds=1)  # noqa: SLF001
 
     with patch(
@@ -364,6 +370,7 @@ async def test_media_player_skips_unchanged_writes(hass: HomeAssistant) -> None:
     entry = _entry(unique_id=f"{DOMAIN}_throttle", **{CONF_DISPLAYS: []})
     entry.add_to_hass(hass)
     coordinator = SpinJamCoordinator(hass, entry)
+    await coordinator.async_set_tracking(True)
     await coordinator.async_refresh()
     player = SpinJamMediaPlayer(coordinator, entry)
     player.hass = hass
@@ -405,6 +412,7 @@ async def test_cast_wake_called_on_start(hass: HomeAssistant) -> None:
         ),
     ):
         await coordinator.async_start()
+        await hass.async_block_till_done()
 
     wake.assert_awaited_once()
     assert coordinator.cast_active is True

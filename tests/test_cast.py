@@ -81,6 +81,7 @@ async def test_start_casts_lovelace_view(hass: HomeAssistant) -> None:
         ),
     ):
         target = await coordinator.async_start("media_player.example_tv")
+        assert coordinator._cast_active is True  # noqa: SLF001 — optimistic
         await hass.async_block_till_done()
 
     assert target == "media_player.example_tv"
@@ -187,6 +188,7 @@ async def test_lyric_offset_positive_means_later(hass: HomeAssistant) -> None:
 
     with patch.object(SpinJamCoordinator, "_client", return_value=mock_client):
         coordinator = SpinJamCoordinator(hass, entry)
+        await coordinator.async_set_tracking(True)
         await coordinator.async_refresh()
 
     assert coordinator.data.lyric_current == "Everything"

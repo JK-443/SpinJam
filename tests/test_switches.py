@@ -194,6 +194,7 @@ async def test_cast_ignores_off_briefly_then_unavailable_clears(
         ),
     ):
         await coordinator.async_start()
+        await hass.async_block_till_done()
     assert coordinator.cast_active is True
 
     hass.states.async_set("media_player.example_tv", STATE_OFF, {})
@@ -227,6 +228,7 @@ async def test_tracking_off_clears_and_stops_polling(hass: HomeAssistant) -> Non
     entry = _entry(unique_id=f"{DOMAIN}_track", **{CONF_DISPLAYS: []})
     entry.add_to_hass(hass)
     coordinator = SpinJamCoordinator(hass, entry)
+    await coordinator.async_set_tracking(True)
     await coordinator.async_refresh()
     assert coordinator.data.active is not None
     assert coordinator.data.active.title == "Song A"
@@ -291,6 +293,7 @@ async def test_tracking_off_stops_cast(hass: HomeAssistant) -> None:
         ),
     ):
         await coordinator.async_start()
+        await hass.async_block_till_done()
         assert coordinator.cast_active is True
         await coordinator.async_set_tracking(False)
     assert coordinator.cast_active is False
@@ -368,7 +371,8 @@ async def test_no_recast_on_startup_by_default(hass: HomeAssistant) -> None:
     assert cast_state.state == STATE_OFF
     tracking = hass.states.get("switch.spinjam_tracking")
     assert tracking is not None
-    assert tracking.state == STATE_ON
+    # After restart Cast is off → tracking must start off (not restore ON).
+    assert tracking.state == STATE_OFF
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     await hass.async_stop()

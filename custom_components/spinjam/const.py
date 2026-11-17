@@ -81,6 +81,39 @@ LINE_IN_SOURCES = frozenset(
     }
 )
 
+# Input / passthrough sources that are not real music now-playing (e.g. HDMI ARC
+# flipping a soundbar to "TV" when the Cast display wakes).
+IGNORED_PASSTHROUGH_SOURCES = frozenset(
+    {
+        *LINE_IN_SOURCES,
+        "tv",
+        "television",
+        "hdmi",
+        "hdmi1",
+        "hdmi2",
+        "hdmi3",
+        "hdmi4",
+        "hdmi 1",
+        "hdmi 2",
+        "hdmi 3",
+        "hdmi 4",
+        "hdmi-1",
+        "hdmi-2",
+        "optical",
+        "opt",
+        "toslink",
+        "spdif",
+        "s/pdif",
+        "arc",
+        "earc",
+        "e-arc",
+        "e_arc",
+        "hdmi arc",
+        "hdmi-arc",
+        "hdmi earc",
+    }
+)
+
 MQTT_CMD_IDENTIFY = "spinjam/cmd/identify"
 MQTT_CMD_SYNC_OFFSET = "spinjam/cmd/sync_offset_ms"
 MQTT_CMD_CLEAR = "spinjam/cmd/clear"

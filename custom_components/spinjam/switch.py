@@ -109,11 +109,12 @@ class SpinJamTrackingSwitch(_SpinJamSwitchBase):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        last = await self.async_get_last_state()
-        if last is None:
+        # After HA restart Cast is off unless recast_on_startup already fired.
+        # Match cast: do not restore tracking ON while Cast is off.
+        if self.coordinator.cast_active:
             await self.coordinator.async_set_tracking(True)
         else:
-            await self.coordinator.async_set_tracking(last.state == STATE_ON)
+            await self.coordinator.async_set_tracking(False)
         self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs) -> None:

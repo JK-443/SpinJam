@@ -126,9 +126,9 @@ async def test_start_validates_display_and_fires_event(hass: HomeAssistant) -> N
         ),
     ):
         target = await coordinator.async_start("media_player.example_tv_2")
+        await hass.async_block_till_done()
     assert target == "media_player.example_tv_2"
     assert coordinator.selected_display == "media_player.example_tv_2"
-    await hass.async_block_till_done()
     assert events and events[-1]["display"] == "media_player.example_tv_2"
     await coordinator.async_shutdown()
     await hass.async_stop()

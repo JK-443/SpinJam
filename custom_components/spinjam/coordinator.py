@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import logging
@@ -86,7 +87,7 @@ class SpinJamData:
     sync_offset_ms: int = 0
     lyric_offset_ms: int = 0
     position_updated_at: datetime | None = None
-    tracking_enabled: bool = True
+    tracking_enabled: bool = False
     cast_active: bool = False
 
 
@@ -98,17 +99,20 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         options = {**entry.data, **entry.options}
         interval = float(options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL))
         self._poll_interval = timedelta(seconds=max(0.5, interval))
+        # Tracking starts off after HA restart (Cast sessions do not survive).
+        # The cast/tracking switches align this during async_added_to_hass.
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=self._poll_interval,
+            update_interval=None,
         )
         self.data = SpinJamData(
             sync_offset_ms=int(options.get(CONF_SYNC_OFFSET_MS, DEFAULT_SYNC_OFFSET_MS)),
             lyric_offset_ms=int(
                 options.get(CONF_LYRIC_OFFSET_MS, DEFAULT_LYRIC_OFFSET_MS)
             ),
+            tracking_enabled=False,
         )
         self._lyrics_client: LrcLibClient | None = None
         self._unsub_state: Any = None
@@ -123,9 +127,10 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         self._cast_display: str | None = None
         self._unsub_recast: Any = None
         self._unsub_cast_display: Any = None
-        self._tracking_enabled = True
+        self._tracking_enabled = False
         self._ending_cast = False
         self._cast_launch_until: datetime | None = None
+        self._cast_start_task: asyncio.Task[Any] | None = None
         # Last SpinJam card JS version cast to each display (Cast caches resources).
         self._cast_card_version_by_display: dict[str, str] = {}
         self._last_publish_fingerprint: tuple[Any, ...] | None = None
@@ -221,11 +226,40 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         self._unsub_state = async_track_state_change_event(self.hass, entities, _on_state)
 
     async def async_shutdown(self) -> None:
+        self._async_cancel_cast_start_task()
         self._async_stop_recast()
         self._async_unwatch_cast_display()
         if self._unsub_state:
             self._unsub_state()
             self._unsub_state = None
+
+    def _async_cancel_cast_start_task(self) -> None:
+        task = self._cast_start_task
+        self._cast_start_task = None
+        if task is not None and not task.done():
+            task.cancel()
+
+    def _warn_if_sources_look_like_arc(self, display: str) -> None:
+        """Log when a configured source looks HDMI/ARC-linked after a Cast wake."""
+        from .source import is_passthrough_source, is_tv_placeholder_track
+
+        for entity_id in self.source_players:
+            state = self.hass.states.get(entity_id)
+            if state is None:
+                continue
+            source = state.attributes.get("source")
+            title = state.attributes.get("media_title")
+            artist = state.attributes.get("media_artist")
+            if is_passthrough_source(source) or is_tv_placeholder_track(title, artist):
+                _LOGGER.warning(
+                    "Source %s looks like TV/HDMI/ARC input (source=%s title=%s) "
+                    "after casting to %s — SpinJam ignores passthrough inputs; "
+                    "consider removing linked soundbars from source_players",
+                    entity_id,
+                    source,
+                    title,
+                    display,
+                )
 
     def _collect_snapshots(self):
         snaps = []
@@ -500,7 +534,11 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             await self.async_request_refresh()
 
     async def async_start(self, display: str | None = None) -> str:
-        """Select a display, cast (master on), enable tracking, fire ``spinjam_start``."""
+        """Select a display, cast (master on), enable tracking, fire ``spinjam_start``.
+
+        Builtin cast wake/launch/verify runs in a background task so the Cast
+        switch returns immediately (optimistically on). Failure reverts the switch.
+        """
         configured = self.displays
         if not configured:
             raise ServiceValidationError(
@@ -531,32 +569,76 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
                 )
                 do_builtin = False
 
+        # Optimistic on — background task reverts on failure.
+        self._async_cancel_cast_start_task()
+        self._async_set_cast_active(True, target)
+        self.hass.bus.async_fire(EVENT_SPINJAM_START, {"display": target})
+        await self.async_request_refresh()
+
         if do_builtin:
+            self._cast_start_task = self._async_create_cast_start_task(
+                self._async_cast_start_job(
+                    target,
+                    dashboard_path=str(opts[CONF_DASHBOARD_PATH]),
+                    view_path=str(opts[CONF_VIEW_PATH]),
+                    opts=opts,
+                )
+            )
+        else:
+            self._async_stop_recast()
+
+        return target
+
+    def _async_create_cast_start_task(self, coro: Any) -> asyncio.Task[Any]:
+        """Schedule wake/launch/verify off the switch turn_on path."""
+        name = f"{DOMAIN}_cast_start"
+        if hasattr(self.entry, "async_create_background_task"):
+            return self.entry.async_create_background_task(self.hass, coro, name)
+        if hasattr(self.hass, "async_create_background_task"):
+            return self.hass.async_create_background_task(coro, name)
+        return self.hass.async_create_task(coro)
+
+    async def _async_cast_start_job(
+        self,
+        target: str,
+        *,
+        dashboard_path: str,
+        view_path: str,
+        opts: dict[str, Any],
+    ) -> None:
+        """Background wake → cast → verify; revert switch on failure."""
+        try:
             ok = await self._async_cast_lovelace_view(
                 target,
-                dashboard_path=str(opts[CONF_DASHBOARD_PATH]),
-                view_path=str(opts[CONF_VIEW_PATH]),
+                dashboard_path=dashboard_path,
+                view_path=view_path,
             )
             if not ok:
                 _LOGGER.warning(
                     "SpinJam cast to %s failed — leaving switch.spinjam_cast off",
                     target,
                 )
+                if self._cast_active and self._cast_display == target:
+                    self._async_stop_recast()
+                    self._async_set_cast_active(False)
+                return
+            if self._cast_active and self._cast_display == target:
+                self._async_schedule_recast(opts)
+                self._warn_if_sources_look_like_arc(target)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("SpinJam cast start job failed for %s", target)
+            if self._cast_active and self._cast_display == target:
+                self._async_stop_recast()
                 self._async_set_cast_active(False)
-                if self.cast_switch is not None and self.cast_switch.hass is not None:
-                    self.cast_switch.async_write_ha_state()
-                return target
-            self._async_schedule_recast(opts)
-        else:
-            self._async_stop_recast()
-
-        self._async_set_cast_active(True, target)
-        self.hass.bus.async_fire(EVENT_SPINJAM_START, {"display": target})
-        await self.async_request_refresh()
-        return target
+        finally:
+            if self._cast_start_task is asyncio.current_task():
+                self._cast_start_task = None
 
     async def async_stop(self) -> None:
         """End Cast, stop recast, disable tracking, and clear now-playing."""
+        self._async_cancel_cast_start_task()
         self._async_stop_recast()
         display = self._cast_display or self.selected_display
         was_active = self._cast_active

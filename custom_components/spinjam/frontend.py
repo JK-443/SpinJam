@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 from homeassistant.core import HomeAssistant
@@ -59,21 +60,43 @@ def _resource_path(url: str) -> str:
     return urlsplit(url).path
 
 
+def lovelace_resources(hass: HomeAssistant) -> Any | None:
+    """Return the Lovelace resources collection for current or legacy HA.
+
+    Newer HA stores ``hass.data['lovelace']`` as a ``LovelaceData``-like object
+    with a ``.resources`` attribute. Older builds used a plain dict.
+    """
+    lovelace = hass.data.get("lovelace")
+    if lovelace is None:
+        return None
+    resources = getattr(lovelace, "resources", None)
+    if resources is not None:
+        return resources
+    if isinstance(lovelace, dict):
+        return lovelace.get("resources")
+    return None
+
+
 async def async_register_lovelace_resource(hass: HomeAssistant, url: str) -> bool:
     """Create or update a storage-mode Lovelace module resource for the card.
 
     Cast receivers load only Lovelace resources (not ``add_extra_js_url`` alone).
     YAML-mode Lovelace cannot be mutated — log and skip.
+    Matching ignores the ``?v=`` query so version bumps update in place.
     """
-    lovelace = hass.data.get("lovelace")
-    if not isinstance(lovelace, dict) or "resources" not in lovelace:
-        _LOGGER.debug("Lovelace resources unavailable; skipping module registration")
+    resources = lovelace_resources(hass)
+    if resources is None:
+        _LOGGER.warning(
+            "Lovelace resources unavailable (hass.data['lovelace'] missing or "
+            "unrecognized); skipping module registration for %s — Cast will not "
+            "load the SpinJam card until a Lovelace resource exists",
+            url,
+        )
         return False
 
-    resources = lovelace["resources"]
     # YAML collection has no create/update — storage collection does.
     if not hasattr(resources, "async_create_item"):
-        _LOGGER.info(
+        _LOGGER.warning(
             "Lovelace is in YAML mode — add `%s` as a module resource manually "
             "(Cast will not see add_extra_js_url)",
             url,
@@ -85,7 +108,7 @@ async def async_register_lovelace_resource(hass: HomeAssistant, url: str) -> boo
             await resources.async_load()
             resources.loaded = True
     except Exception as err:  # noqa: BLE001
-        _LOGGER.debug("Could not load Lovelace resources: %s", err)
+        _LOGGER.warning("Could not load Lovelace resources: %s", err)
         return False
 
     items = list(resources.async_items() or [])
