@@ -48,7 +48,7 @@ def test_priority_picks_first_playing() -> None:
             position_updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         ),
         SourceSnapshot(
-            entity_id="media_player.media_room",
+            entity_id="media_player.office",
             state="playing",
             title="Song B",
             artist="Artist B",
@@ -61,7 +61,7 @@ def test_priority_picks_first_playing() -> None:
         priority=[
             "media_player.kitchen",
             "media_player.living_room",
-            "media_player.media_room",
+            "media_player.office",
         ],
         vinyl_entity_id=None,
         sync_offset_ms=0,
@@ -77,7 +77,7 @@ def test_priority_picks_first_playing() -> None:
 def test_line_in_defers_to_vinyl() -> None:
     snaps = [
         SourceSnapshot(
-            entity_id="media_player.unnamed_room",
+            entity_id="media_player.living_room_port",
             state="playing",
             source="Line-in",
             title=None,
@@ -95,7 +95,7 @@ def test_line_in_defers_to_vinyl() -> None:
     ]
     active = select_active_source(
         snaps,
-        priority=["media_player.unnamed_room", "media_player.spinjam_turntable"],
+        priority=["media_player.living_room_port", "media_player.spinjam_turntable"],
         vinyl_entity_id="media_player.spinjam_turntable",
         sync_offset_ms=0,
     )
