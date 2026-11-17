@@ -12,6 +12,7 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
+    CONF_DISPLAYS,
     CONF_LYRICS_ENABLED,
     CONF_SOURCE_PLAYERS,
     CONF_SYNC_OFFSET_MS,
@@ -23,6 +24,49 @@ from .const import (
 )
 
 
+def entity_selector_supports_reorder() -> bool:
+    """Return True when this HA build's EntitySelector schema accepts reorder."""
+    try:
+        selector.EntitySelector(
+            selector.EntitySelectorConfig(
+                domain="media_player", multiple=True, reorder=True
+            )
+        )
+    except vol.Invalid:
+        return False
+    return True
+
+
+def source_players_selector() -> selector.EntitySelector:
+    """Multi media_player picker; enable drag-reorder when HA supports it."""
+    if entity_selector_supports_reorder():
+        return selector.EntitySelector(
+            selector.EntitySelectorConfig(
+                domain="media_player", multiple=True, reorder=True
+            )
+        )
+    return selector.EntitySelector(
+        selector.EntitySelectorConfig(domain="media_player", multiple=True)
+    )
+
+
+def displays_selector() -> selector.EntitySelector:
+    """Optional multi media_player picker for Cast/display targets."""
+    return source_players_selector()
+
+
+def _add_optional_single_media_player(
+    fields: dict[Any, Any], key: str, default: str | None
+) -> None:
+    entity_selector = selector.EntitySelector(
+        selector.EntitySelectorConfig(domain="media_player", multiple=False)
+    )
+    if default:
+        fields[vol.Optional(key, default=default)] = entity_selector
+    else:
+        fields[vol.Optional(key)] = entity_selector
+
+
 def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
     defaults = defaults or {}
     fields: dict[Any, Any] = {
@@ -30,9 +74,11 @@ def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
         vol.Required(
             CONF_SOURCE_PLAYERS,
             default=defaults.get(CONF_SOURCE_PLAYERS, []),
-        ): selector.EntitySelector(
-            selector.EntitySelectorConfig(domain="media_player", multiple=True)
-        ),
+        ): source_players_selector(),
+        vol.Optional(
+            CONF_DISPLAYS,
+            default=defaults.get(CONF_DISPLAYS, []),
+        ): displays_selector(),
         vol.Required(
             CONF_LYRICS_ENABLED,
             default=defaults.get(CONF_LYRICS_ENABLED, DEFAULT_LYRICS_ENABLED),
@@ -42,17 +88,9 @@ def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             default=defaults.get(CONF_SYNC_OFFSET_MS, DEFAULT_SYNC_OFFSET_MS),
         ): vol.All(vol.Coerce(int), vol.Range(min=-2000, max=2000)),
     }
-    vinyl_default = defaults.get(CONF_VINYL_PLAYER)
-    if vinyl_default:
-        fields[
-            vol.Optional(CONF_VINYL_PLAYER, default=vinyl_default)
-        ] = selector.EntitySelector(
-            selector.EntitySelectorConfig(domain="media_player", multiple=False)
-        )
-    else:
-        fields[vol.Optional(CONF_VINYL_PLAYER)] = selector.EntitySelector(
-            selector.EntitySelectorConfig(domain="media_player", multiple=False)
-        )
+    _add_optional_single_media_player(
+        fields, CONF_VINYL_PLAYER, defaults.get(CONF_VINYL_PLAYER)
+    )
     return vol.Schema(fields)
 
 
@@ -71,6 +109,11 @@ class SpinJamConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if not sources:
                 errors["base"] = "no_sources"
             else:
+                # Normalize optional displays to a list; drop legacy keys if present.
+                displays = user_input.get(CONF_DISPLAYS) or []
+                if isinstance(displays, str):
+                    displays = [displays]
+                user_input[CONF_DISPLAYS] = list(displays)
                 await self.async_set_unique_id(DOMAIN)
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(
@@ -93,7 +136,14 @@ class SpinJamOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         if user_input is not None:
+            displays = user_input.get(CONF_DISPLAYS) or []
+            if isinstance(displays, str):
+                displays = [displays]
+            user_input[CONF_DISPLAYS] = list(displays)
             return self.async_create_entry(title="", data=user_input)
 
         current = {**self.config_entry.data, **self.config_entry.options}
+        # Prefer displays; migrate legacy single display_entity into the form default.
+        if not current.get(CONF_DISPLAYS) and current.get("display_entity"):
+            current[CONF_DISPLAYS] = [current["display_entity"]]
         return self.async_show_form(step_id="init", data_schema=_schema(current))
