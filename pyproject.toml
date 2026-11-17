@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spinjam"
-version = "0.1.0"
-description = "Vinyl capture and recognition node that publishes now-playing to Home Assistant over MQTT"
+version = "0.2.0"
+description = "Now-playing for Home Assistant: HA integration + vinyl capture MQTT node"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -20,6 +20,10 @@ dependencies = [
 dev = [
   "pytest>=8.0.0",
   "pytest-asyncio>=0.23.0",
+]
+ha = [
+  # Pins an older paho-mqtt transitively; install in a dedicated venv for HA tests.
+  "pytest-homeassistant-custom-component>=0.13.190",
 ]
 
 [project.scripts]

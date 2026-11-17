@@ -54,6 +54,11 @@ identify:
   auto_on_music: true
   # Skip network Shazam when false (fixture tests / offline)
   use_shazam: true
+  # Optional fallbacks (tried after Shazam if set)
+  audd_api_token: null
+  acr_host: null              # e.g. identify-eu-west-1.acrcloud.com
+  acr_access_key: null
+  acr_access_secret: null
 
 sync:
   # Extra offset applied later for lyrics/position (Phase 4). Exposed as MQTT number now.

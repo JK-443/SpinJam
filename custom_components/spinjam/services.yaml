@@ -1,0 +1,32 @@
+identify:
+  name: Identify vinyl
+  description: Ask the vinyl capture node to identify the current audio (MQTT).
+
+set_sync_offset:
+  name: Set sync offset
+  description: Adjust lyric/position sync offset in milliseconds.
+  fields:
+    offset_ms:
+      name: Offset
+      description: Milliseconds to add to media position for lyrics (negative = earlier).
+      required: true
+      selector:
+        number:
+          min: -2000
+          max: 2000
+          unit_of_measurement: ms
+
+select_album:
+  name: Select album
+  description: Manually lock/select an album (forwarded to vinyl node when present).
+  fields:
+    album:
+      name: Album
+      description: Album name or Discogs/search string.
+      required: true
+      selector:
+        text:
+
+clear_lock:
+  name: Clear lock
+  description: Clear manual album lock and vinyl now-playing metadata.

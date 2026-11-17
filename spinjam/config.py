@@ -54,6 +54,11 @@ class IdentifyConfig:
     min_interval_seconds: float = 12.0
     auto_on_music: bool = True
     use_shazam: bool = True
+    # Optional paid/fallback providers (tried after Shazam when configured)
+    audd_api_token: str | None = None
+    acr_host: str | None = None
+    acr_access_key: str | None = None
+    acr_access_secret: str | None = None
 
 
 @dataclass

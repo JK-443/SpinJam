@@ -1,97 +1,77 @@
 # SpinJam
 
-Vinyl capture and recognition node for Home Assistant. Taps the **Sonos Port line-out** (Fixed), identifies the playing track, and publishes a `media_player` plus sensors to HA over **MQTT**. Recognition runs on a dedicated Pi — not on the HA host.
+**General now-playing for Home Assistant.** SpinJam aggregates Music Assistant, Sonos, and a vinyl MQTT capture node into one unified `media_player`, with optional LRCLIB synced lyrics. Vinyl recognition runs on a dedicated Pi — never on the HA host.
 
-Phase 1 delivers the capture/recognition service, MQTT discovery, silence FSM, Shazam (optional), and a **file/fixture mode** so you can test before the UCA202 arrives.
+## Pieces
 
-## Architecture (Phase 1)
+| Path | What |
+| --- | --- |
+| [`custom_components/spinjam`](custom_components/spinjam) | HACS-installable HA integration (brain) |
+| [`spinjam/`](spinjam) | Vinyl capture/recognition MQTT node (Pi) |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System design |
+| [`docs/PHASE0_HARDWARE.md`](docs/PHASE0_HARDWARE.md) | Port OUT → UCA202 cabling |
+| [`docs/FIXTURE_MODE.md`](docs/FIXTURE_MODE.md) | Test vinyl node without USB hardware |
 
 ```
-Turntable → Sonos Port IN → Sonos speakers
-                 ↓
-            Port OUT (Fixed) → UCA202 → Pi (SpinJam)
-                                           ↓ MQTT
-                                      Mosquitto → HA
+Music Assistant / Sonos media_players ──┐
+                                        ├─► HA SpinJam integration ─► media_player.spinjam_now_playing
+Vinyl Pi (Shazam → MQTT) ───────────────┘         │
+                                                  └─ LRCLIB lyrics (cached)
 ```
 
-Docs:
+When a configured Sonos/Port player’s source is **Line-in**, SpinJam uses the vinyl MQTT player instead of Port metadata.
 
-- [Phase 0 hardware & Port prep](docs/PHASE0_HARDWARE.md)
-- [Fixture / file mode](docs/FIXTURE_MODE.md)
+## Install the HA integration (Marc)
 
-## Quick start (no USB hardware)
+### Option A — HACS (custom repository)
+
+1. HACS → Integrations → ⋮ → Custom repositories  
+2. URL: `https://github.com/JK-443/SpinJam`, category **Integration**  
+3. Download **SpinJam**, then restart Home Assistant  
+4. Settings → Devices & services → Add Integration → **SpinJam**  
+5. Select source media players (priority order), e.g.:
+   - `media_player.turntable` (Music Assistant)
+   - Sonos rooms (`media_player.media_room`, `kitchen`, …)
+   - Optional vinyl: `media_player.spinjam_turntable` (after the capture node is up)
+6. Enable lyrics; leave sync offset at `0` until you calibrate
+
+### Option B — Manual
+
+Copy `custom_components/spinjam` into your HA `config/custom_components/spinjam`, restart, then add the integration as above.
+
+### Try it
+
+1. Play a track on any configured Music Assistant or Sonos player.  
+2. Open Developer Tools → States → `media_player.spinjam_now_playing`.  
+3. Confirm artist/title/album/art; with lyrics enabled, check `lyric_current` / `lyric_next`.  
+4. Services: `spinjam.identify`, `spinjam.set_sync_offset`, `spinjam.select_album`, `spinjam.clear_lock`.
+
+## Vinyl capture node (optional source)
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-python3 scripts/generate_fixture_wav.py
-cp config.example.yaml config.yaml
-# set mqtt.host to your Mosquitto broker (or leave 127.0.0.1 for local broker)
-
-pytest -q
-spinjam -c config.yaml --no-shazam --no-realtime
+cp config.example.yaml config.yaml   # mqtt.host = Mosquitto
+spinjam -c config.yaml --no-shazam --no-realtime   # fixture mode
 ```
 
-With a broker, HA should auto-discover **SpinJam Turntable** (`media_player.spinjam_turntable`) when MQTT discovery is enabled.
-
-### Commands (MQTT)
-
-| Topic | Payload | Effect |
-| --- | --- | --- |
-| `spinjam/cmd/identify` | any | Force a recognition pass |
-| `spinjam/cmd/sync_offset_ms` | `0` or `{"value": 50}` | Set lyric/position offset (ms) |
-| `spinjam/cmd/clear` | any | Clear now-playing metadata |
-
-## Live capture (after UCA202)
-
-1. Follow [Phase 0](docs/PHASE0_HARDWARE.md): Port OUT Fixed → UCA202 → Pi.
-2. `arecord -l` and set `capture.alsa_device` (often `plughw:1,0`).
-3. In `config.yaml`:
-
-```yaml
-capture:
-  mode: alsa
-  alsa_device: "plughw:1,0"
-identify:
-  use_shazam: true
-```
-
-4. Install as a service (Pi OS):
-
-```bash
-sudo mkdir -p /opt/spinjam
-sudo rsync -a --exclude .venv ./ /opt/spinjam/
-cd /opt/spinjam && sudo python3 -m venv .venv && sudo .venv/bin/pip install -e .
-sudo cp deploy/spinjam.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now spinjam
-```
-
-Pi Zero 2 W: see USB/Wi‑Fi note in Phase 0 docs (`dtoverlay=dwc2,dr_mode=host`).
-
-## MQTT entities (discovery)
-
-- `media_player.spinjam_turntable` — artist / title / album / art URL attributes
-- `sensor.spinjam_turntable_status` — `idle` / `music` / `gap` / `identifying` / `locked`
-- `sensor.spinjam_turntable_level` — input level dBFS
-- `number.spinjam_turntable_sync_offset` — ms offset for later lyrics sync
-- `button.spinjam_turntable_identify` — identify now
+Live ALSA + Shazam after UCA202: see Phase 0 docs. Optional AudD / ACRCloud fallback keys go under `identify:` in `config.yaml`.
 
 ## Tests
 
 ```bash
+pip install -e ".[dev]"
+pytest -q
+# Optional full HA integration tests:
+pip install -e ".[ha]"
 pytest -q
 ```
 
-Covers silence FSM transitions and HA MQTT discovery payload shape.
-
 ## Roadmap
 
-- **Phase 2:** HA Lovelace `spinjam-now` view + Bravia Cast automations
-- **Phase 3:** Manual album select + Discogs tracklist lock
-- **Phase 4:** LRCLIB synced lyrics
-- **Phase 5:** AudD/ACR fallback, polish
+- **Display:** Lovelace now-playing view cast to Bravia (`media_player.basement_tv`)
+- **Album lock:** Discogs tracklists + vinyl position confirm
+- **Polish:** art caching, scrobble
 
 ## Licence
 
