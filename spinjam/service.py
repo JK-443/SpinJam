@@ -29,6 +29,10 @@ class SpinJamService:
         self.identifier = identifier or build_identifier(
             use_shazam=config.identify.use_shazam,
             fixture_fallback=True,
+            audd_token=config.identify.audd_api_token,
+            acr_host=config.identify.acr_host,
+            acr_access_key=config.identify.acr_access_key,
+            acr_access_secret=config.identify.acr_access_secret,
         )
         self.mqtt = MqttHaClient(config, on_command=self.handle_command)
         self.ring = RingBuffer(
