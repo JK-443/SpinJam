@@ -23,6 +23,36 @@ from .const import (
 )
 
 
+def entity_selector_supports_reorder() -> bool:
+    """Return True when this HA build's EntitySelector schema accepts reorder."""
+    try:
+        selector.EntitySelector(
+            selector.EntitySelectorConfig(
+                domain="media_player", multiple=True, reorder=True
+            )
+        )
+    except vol.Invalid:
+        return False
+    return True
+
+
+def source_players_selector() -> selector.EntitySelector:
+    """Multi media_player picker; enable drag-reorder when HA supports it.
+
+    Config and options both use this so the saved list order is the priority
+    order (HA otherwise sorts entity picks alphabetically).
+    """
+    if entity_selector_supports_reorder():
+        return selector.EntitySelector(
+            selector.EntitySelectorConfig(
+                domain="media_player", multiple=True, reorder=True
+            )
+        )
+    return selector.EntitySelector(
+        selector.EntitySelectorConfig(domain="media_player", multiple=True)
+    )
+
+
 def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
     defaults = defaults or {}
     fields: dict[Any, Any] = {
@@ -30,9 +60,7 @@ def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
         vol.Required(
             CONF_SOURCE_PLAYERS,
             default=defaults.get(CONF_SOURCE_PLAYERS, []),
-        ): selector.EntitySelector(
-            selector.EntitySelectorConfig(domain="media_player", multiple=True)
-        ),
+        ): source_players_selector(),
         vol.Required(
             CONF_LYRICS_ENABLED,
             default=defaults.get(CONF_LYRICS_ENABLED, DEFAULT_LYRICS_ENABLED),
