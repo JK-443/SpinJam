@@ -55,8 +55,8 @@ Copy `custom_components/spinjam` into your HA `config/custom_components/spinjam`
 
 | Entity | Role |
 | --- | --- |
-| `switch.spinjam_cast` | On = `spinjam.start` (selected `select.spinjam_display`); off = `spinjam.stop`. Tracks whether a SpinJam cast session is active. |
-| `switch.spinjam_tracking` | On (default) follows sources / polls; off **holds** the last now-playing snapshot (no polling). Leaving tracking off does **not** stop Cast. |
+| `switch.spinjam_cast` | **Master on/off.** On = wake + cast + tracking on (`spinjam.start`); off = quit Cast, tracking off, clear now-playing (`spinjam.stop`). |
+| `switch.spinjam_tracking` | On (default) follows sources / polls; off clears now-playing and also stops Cast if active. Tracking on does not start Cast. |
 
 Options: **Built-in casting** (default on) — when off, start/stop and the Cast switch only fire `spinjam_start` / `spinjam_stop` so you can cast from your own automations without double-casting. **Recast on startup** (default off) — only then will a previously-on Cast switch re-cast after an HA restart.
 

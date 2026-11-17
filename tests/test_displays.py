@@ -108,10 +108,22 @@ async def test_start_validates_display_and_fires_event(hass: HomeAssistant) -> N
 
     # Skip refresh debounce in start by stubbing request_refresh.
     coordinator.async_request_refresh = AsyncMock()  # type: ignore[method-assign]
-    with patch(
-        "custom_components.spinjam.coordinator.async_show_now_playing",
-        new_callable=AsyncMock,
-        return_value=True,
+    with (
+        patch(
+            "custom_components.spinjam.coordinator.async_wake_display",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch(
+            "custom_components.spinjam.coordinator.async_show_now_playing",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch(
+            "custom_components.spinjam.coordinator.async_wait_for_lovelace_app",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
     ):
         target = await coordinator.async_start("media_player.example_tv_2")
     assert target == "media_player.example_tv_2"

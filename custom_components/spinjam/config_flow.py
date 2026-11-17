@@ -18,6 +18,7 @@ from .const import (
     CONF_DISPLAYS,
     CONF_LYRIC_OFFSET_MS,
     CONF_LYRICS_ENABLED,
+    CONF_POWER_OFF_DISPLAY_ON_STOP,
     CONF_RECAST_INTERVAL,
     CONF_RECAST_ON_STARTUP,
     CONF_RECAST_WHILE_PLAYING,
@@ -30,6 +31,7 @@ from .const import (
     DEFAULT_LYRIC_OFFSET_MS,
     DEFAULT_LYRICS_ENABLED,
     DEFAULT_NAME,
+    DEFAULT_POWER_OFF_DISPLAY_ON_STOP,
     DEFAULT_RECAST_INTERVAL,
     DEFAULT_RECAST_ON_STARTUP,
     DEFAULT_RECAST_WHILE_PLAYING,
@@ -197,6 +199,12 @@ def _schema(defaults: dict[str, Any] | None = None, *, options: bool = False) ->
         fields[vol.Required(
             CONF_RECAST_ON_STARTUP,
             default=defaults.get(CONF_RECAST_ON_STARTUP, DEFAULT_RECAST_ON_STARTUP),
+        )] = _boolean_selector()
+        fields[vol.Required(
+            CONF_POWER_OFF_DISPLAY_ON_STOP,
+            default=defaults.get(
+                CONF_POWER_OFF_DISPLAY_ON_STOP, DEFAULT_POWER_OFF_DISPLAY_ON_STOP
+            ),
         )] = _boolean_selector()
     return vol.Schema(fields)
 

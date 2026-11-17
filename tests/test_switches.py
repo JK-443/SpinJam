@@ -68,11 +68,27 @@ async def test_cast_switch_syncs_with_start_stop(hass: HomeAssistant) -> None:
     hass.bus.async_listen(EVENT_SPINJAM_START, lambda e: events_start.append(e.data))
     hass.bus.async_listen(EVENT_SPINJAM_STOP, lambda e: events_stop.append(e.data))
 
-    with patch(
-        "custom_components.spinjam.coordinator.async_show_now_playing",
-        new_callable=AsyncMock,
-        return_value=True,
-    ) as show:
+    def _cast_ok():
+        return (
+            patch(
+                "custom_components.spinjam.coordinator.async_wake_display",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch(
+                "custom_components.spinjam.coordinator.async_show_now_playing",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch(
+                "custom_components.spinjam.coordinator.async_wait_for_lovelace_app",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+        )
+
+    wake, show_p, wait = _cast_ok()
+    with wake, show_p as show, wait:
         await switch.async_turn_on()
         await hass.async_block_till_done()
     assert switch.is_on is True
@@ -89,15 +105,13 @@ async def test_cast_switch_syncs_with_start_stop(hass: HomeAssistant) -> None:
         await hass.async_block_till_done()
     assert switch.is_on is False
     assert coordinator.cast_active is False
+    assert coordinator.tracking_enabled is False
     end.assert_awaited()
     assert events_stop
 
     # Service path keeps switch in sync.
-    with patch(
-        "custom_components.spinjam.coordinator.async_show_now_playing",
-        new_callable=AsyncMock,
-        return_value=True,
-    ):
+    wake, show_p, wait = _cast_ok()
+    with wake, show_p, wait:
         await coordinator.async_start()
         await hass.async_block_till_done()
     assert switch.is_on is True
@@ -144,31 +158,63 @@ async def test_builtin_casting_off_fires_events_only(hass: HomeAssistant) -> Non
 
 
 @pytest.mark.asyncio
-async def test_cast_clears_when_display_goes_off(hass: HomeAssistant) -> None:
+async def test_cast_ignores_off_briefly_then_unavailable_clears(
+    hass: HomeAssistant,
+) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from custom_components.spinjam.const import LOVELACE_APP_NAMES
+
     entry = _entry(unique_id=f"{DOMAIN}_cast_drop")
     entry.add_to_hass(hass)
-    hass.states.async_set("media_player.example_tv", "playing", {})
+    hass.states.async_set(
+        "media_player.example_tv",
+        "playing",
+        {"app_name": next(iter(LOVELACE_APP_NAMES))},
+    )
     coordinator = SpinJamCoordinator(hass, entry)
     coordinator.selected_display = "media_player.example_tv"
     coordinator.async_request_refresh = AsyncMock()  # type: ignore[method-assign]
 
-    with patch(
-        "custom_components.spinjam.coordinator.async_show_now_playing",
-        new_callable=AsyncMock,
-        return_value=True,
+    with (
+        patch(
+            "custom_components.spinjam.coordinator.async_wake_display",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch(
+            "custom_components.spinjam.coordinator.async_show_now_playing",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch(
+            "custom_components.spinjam.coordinator.async_wait_for_lovelace_app",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
     ):
         await coordinator.async_start()
     assert coordinator.cast_active is True
 
     hass.states.async_set("media_player.example_tv", STATE_OFF, {})
     await hass.async_block_till_done()
+    assert coordinator.cast_active is True
+
+    coordinator._cast_launch_until = datetime.now(timezone.utc) - timedelta(seconds=1)  # noqa: SLF001
+    with patch(
+        "custom_components.spinjam.coordinator.async_end_cast",
+        new_callable=AsyncMock,
+        return_value=True,
+    ):
+        hass.states.async_set("media_player.example_tv", "unavailable", {})
+        await hass.async_block_till_done()
     assert coordinator.cast_active is False
     await coordinator.async_shutdown()
     await hass.async_stop()
 
 
 @pytest.mark.asyncio
-async def test_tracking_off_holds_and_stops_polling(hass: HomeAssistant) -> None:
+async def test_tracking_off_clears_and_stops_polling(hass: HomeAssistant) -> None:
     hass.states.async_set(
         "media_player.living_room",
         "playing",
@@ -190,10 +236,8 @@ async def test_tracking_off_holds_and_stops_polling(hass: HomeAssistant) -> None
     assert coordinator.tracking_enabled is False
     assert coordinator.update_interval is None
     assert coordinator._unsub_state is None  # noqa: SLF001
-    assert coordinator.data.active is not None
-    assert coordinator.data.active.title == "Song A"
+    assert coordinator.data.active is None
 
-    # Source changes must not update held snapshot while tracking is off.
     hass.states.async_set(
         "media_player.living_room",
         "playing",
@@ -204,9 +248,8 @@ async def test_tracking_off_holds_and_stops_polling(hass: HomeAssistant) -> None
         },
     )
     await hass.async_block_till_done()
-    # Even a manual refresh while tracking off returns the held snapshot.
     await coordinator.async_refresh()
-    assert coordinator.data.active.title == "Song A"
+    assert coordinator.data.active is None
 
     await coordinator.async_set_tracking(True)
     assert coordinator.tracking_enabled is True
@@ -218,22 +261,39 @@ async def test_tracking_off_holds_and_stops_polling(hass: HomeAssistant) -> None
 
 
 @pytest.mark.asyncio
-async def test_tracking_off_leaves_cast_alone(hass: HomeAssistant) -> None:
+async def test_tracking_off_stops_cast(hass: HomeAssistant) -> None:
     entry = _entry(unique_id=f"{DOMAIN}_track_cast")
     entry.add_to_hass(hass)
     coordinator = SpinJamCoordinator(hass, entry)
     coordinator.selected_display = coordinator.displays[0]
     coordinator.async_request_refresh = AsyncMock()  # type: ignore[method-assign]
 
-    with patch(
-        "custom_components.spinjam.coordinator.async_show_now_playing",
-        new_callable=AsyncMock,
-        return_value=True,
+    with (
+        patch(
+            "custom_components.spinjam.coordinator.async_wake_display",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch(
+            "custom_components.spinjam.coordinator.async_show_now_playing",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch(
+            "custom_components.spinjam.coordinator.async_wait_for_lovelace_app",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch(
+            "custom_components.spinjam.coordinator.async_end_cast",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
     ):
         await coordinator.async_start()
-    assert coordinator.cast_active is True
-    await coordinator.async_set_tracking(False)
-    assert coordinator.cast_active is True
+        assert coordinator.cast_active is True
+        await coordinator.async_set_tracking(False)
+    assert coordinator.cast_active is False
     await coordinator.async_shutdown()
     await hass.async_stop()
 
@@ -254,10 +314,20 @@ async def test_recast_on_startup_option(hass: HomeAssistant) -> None:
             return_value=AsyncMock(fetch=AsyncMock(return_value=None)),
         ),
         patch(
+            "custom_components.spinjam.coordinator.async_wake_display",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch(
             "custom_components.spinjam.coordinator.async_show_now_playing",
             new_callable=AsyncMock,
             return_value=True,
         ) as show,
+        patch(
+            "custom_components.spinjam.coordinator.async_wait_for_lovelace_app",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -308,7 +378,11 @@ async def test_no_recast_on_startup_by_default(hass: HomeAssistant) -> None:
 async def test_options_schema_includes_builtin_casting() -> None:
     pytest.importorskip("homeassistant")
     from custom_components.spinjam.config_flow import _schema
-    from custom_components.spinjam.const import CONF_BUILTIN_CASTING, CONF_RECAST_ON_STARTUP
+    from custom_components.spinjam.const import (
+        CONF_BUILTIN_CASTING,
+        CONF_POWER_OFF_DISPLAY_ON_STOP,
+        CONF_RECAST_ON_STARTUP,
+    )
 
     schema = _schema(options=True)
     data = schema(
@@ -325,10 +399,12 @@ async def test_options_schema_includes_builtin_casting() -> None:
             "recast_while_playing": True,
             "recast_interval": 45,
             "recast_on_startup": True,
+            "power_off_display_on_stop": True,
         }
     )
     assert data[CONF_BUILTIN_CASTING] is False
     assert data[CONF_RECAST_ON_STARTUP] is True
+    assert data[CONF_POWER_OFF_DISPLAY_ON_STOP] is True
 
 
 def test_cast_switch_is_restore_entity() -> None:

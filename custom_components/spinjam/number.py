@@ -62,15 +62,31 @@ class SpinJamLyricOffsetNumber(
             "model": "now-playing",
         }
 
+    def _option_missing(self) -> bool:
+        return (
+            CONF_LYRIC_OFFSET_MS not in self._entry.options
+            and CONF_LYRIC_OFFSET_MS not in self._entry.data
+        )
+
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        last = await self.async_get_last_state()
-        if last is not None and last.state not in ("unknown", "unavailable"):
-            try:
-                await self.coordinator.async_set_lyric_offset(int(float(last.state)))
-            except (TypeError, ValueError):
-                pass
-        self._attr_native_value = float(self.coordinator.data.lyric_offset_ms)
+        # Restore last entity state only when no option/data value exists.
+        # Never persist options during setup (that would reload and clobber).
+        if self._option_missing():
+            last = await self.async_get_last_state()
+            if last is not None and last.state not in ("unknown", "unavailable"):
+                try:
+                    restored = int(float(last.state))
+                    self.coordinator.data.lyric_offset_ms = restored
+                    self._attr_native_value = float(restored)
+                except (TypeError, ValueError):
+                    self._attr_native_value = float(
+                        self.coordinator.data.lyric_offset_ms
+                    )
+            else:
+                self._attr_native_value = float(self.coordinator.data.lyric_offset_ms)
+        else:
+            self._attr_native_value = float(self.coordinator.data.lyric_offset_ms)
         self.async_write_ha_state()
 
     def _handle_coordinator_update(self) -> None:

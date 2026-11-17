@@ -45,7 +45,8 @@
           "view_path": "Cast view path",
           "recast_while_playing": "Re-cast while playing (session drop recovery)",
           "recast_interval": "Re-cast interval (seconds)",
-          "recast_on_startup": "Re-cast on Home Assistant restart if Cast was on"
+          "recast_on_startup": "Re-cast on Home Assistant restart if Cast was on",
+          "power_off_display_on_stop": "Power off display when stopping (default off; Cast quit leaves TV on)"
         }
       }
     },

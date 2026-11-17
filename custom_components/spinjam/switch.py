@@ -50,9 +50,9 @@ class _SpinJamSwitchBase(CoordinatorEntity[SpinJamCoordinator], RestoreEntity, S
 
 
 class SpinJamCastSwitch(_SpinJamSwitchBase):
-    """Toggle SpinJam Cast session (same as spinjam.start / spinjam.stop)."""
+    """Master SpinJam on/off (cast + tracking). Same as spinjam.start / stop."""
 
-    _attr_name = "SpinJam Cast"
+    _attr_name = "SpinJam"
     _attr_icon = "mdi:cast"
 
     def __init__(self, coordinator: SpinJamCoordinator, entry: ConfigEntry) -> None:
@@ -88,7 +88,12 @@ class SpinJamCastSwitch(_SpinJamSwitchBase):
 
 
 class SpinJamTrackingSwitch(_SpinJamSwitchBase):
-    """Pause or resume source following / polling for now-playing."""
+    """Pause or resume source following / polling for now-playing.
+
+    Turning tracking off while Cast is active also stops Cast (clears
+    now-playing). Turning tracking on does not start Cast — use the SpinJam
+    master switch (``switch.spinjam_cast``) for that.
+    """
 
     _attr_name = "SpinJam Tracking"
     _attr_icon = "mdi:radar"

@@ -24,12 +24,13 @@ SpinJam is a **general now-playing system**. Vinyl is one source among Music Ass
 2. `select.spinjam_display` exposes those options; default is the first; last choice is restored after restart.
 3. `spinjam.start` / `switch.spinjam_cast` on (optional `display`) validates against the list, updates the select, and fires `spinjam_start`. When **built-in casting** is on (default), also calls `cast.show_lovelace_view` with configurable `dashboard_path` / `view_path` (defaults `spinjam-tv` / `now`; path must include a hyphen). Non-cast platforms are skipped with a warning.
 4. Optional re-cast while playing recovers dropped Cast sessions; optional **recast on startup** (default off) re-starts Cast after HA restart if the Cast switch was on.
-5. Cast receivers cache Lovelace resources once per session. SpinJam tracks the card JS hash last cast per display; when it changes, `spinjam.start` quits the Cast app (`media_player.turn_off`) before `cast.show_lovelace_view` so the new card loads.
-6. `spinjam.stop` / Cast switch off ends Cast via `media_player.turn_off` when built-in casting is on, and always fires `spinjam_stop`. External Cast end (display off/unavailable) clears the logical session and the Cast switch.
-7. `switch.spinjam_tracking` (default on, RestoreEntity): off pauses source watchers and the ~1 s poll; now-playing **holds** the last snapshot. Tracking off does not stop Cast.
-8. `number.spinjam_lyric_offset` (ms, positive = lyrics later, RestoreEntity) nudges lyric highlighting live; the TV card defaults `offset_entity` to it.
-9. Legacy single `display_entity` config is migrated into a one-item `displays` list when present.
-10. Prefer `spinjam.create_dashboard` (panel: details left, lyrics right). Card JS is auto-registered at `/spinjam/spinjam-lyrics-card.js?v=<hash>`; `spinjam-now-playing-card` remains a deprecated alias.
+5. `switch.spinjam_cast` is the **master on/off**: on wakes the display if needed, casts with verification, and enables tracking; off quits Cast, disables tracking, and clears now-playing to idle.
+6. Cast receivers cache Lovelace resources once per session. SpinJam tracks the card JS hash last cast per display; when it changes, quit before re-cast. Display watcher ignores flaps for ~20 s around launches; session ends on `unavailable` or when `app_name` leaves the HA Lovelace app (not on brief `off`).
+7. `spinjam.stop` / Cast switch off ends Cast via `media_player.turn_off` (app quit; TV usually stays on) when built-in casting is on; optional power-off uses `remote.turn_off`. Always fires `spinjam_stop`.
+8. `switch.spinjam_tracking` (default on): off clears now-playing and, if Cast is active, also stops Cast. Tracking on does not start Cast.
+9. `number.spinjam_lyric_offset` / `sync_offset_ms` update live without config-entry reload; the TV card defaults `offset_entity` to the number entity.
+10. Legacy single `display_entity` config is migrated into a one-item `displays` list when present.
+11. Prefer `spinjam.create_dashboard` (panel: details left, lyrics right). Card JS is a Lovelace module resource at `/spinjam/spinjam-lyrics-card.js?v=<hash>` (plus the same URL via `add_extra_js_url`); `spinjam-now-playing-card` remains a deprecated alias.
 
 ## Memory constraints
 
