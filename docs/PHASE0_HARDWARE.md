@@ -16,7 +16,7 @@ Do **not** plug the UCA202 into the current HAOS Pi (memory-starved; recognition
 
 ## Sonos Port settings
 
-Example Port at `192.168.1.50` (name it whatever you like in Sonos, e.g. “Turntable”):
+Example Port on your LAN (name it whatever you like in Sonos, e.g. “Turntable”):
 
 1. Connect turntable **line-level** to Port **IN** (existing).
 2. Connect Port **analog OUT** → UCA202 INPUT with RCA.

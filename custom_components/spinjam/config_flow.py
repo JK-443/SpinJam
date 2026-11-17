@@ -12,14 +12,24 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
+    CONF_DASHBOARD_PATH,
     CONF_DISPLAYS,
+    CONF_LYRIC_OFFSET_MS,
     CONF_LYRICS_ENABLED,
+    CONF_RECAST_INTERVAL,
+    CONF_RECAST_WHILE_PLAYING,
     CONF_SOURCE_PLAYERS,
     CONF_SYNC_OFFSET_MS,
+    CONF_VIEW_PATH,
     CONF_VINYL_PLAYER,
+    DEFAULT_DASHBOARD_PATH,
+    DEFAULT_LYRIC_OFFSET_MS,
     DEFAULT_LYRICS_ENABLED,
     DEFAULT_NAME,
+    DEFAULT_RECAST_INTERVAL,
+    DEFAULT_RECAST_WHILE_PLAYING,
     DEFAULT_SYNC_OFFSET_MS,
+    DEFAULT_VIEW_PATH,
     DOMAIN,
 )
 
@@ -67,7 +77,7 @@ def _add_optional_single_media_player(
         fields[vol.Optional(key)] = entity_selector
 
 
-def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
+def _schema(defaults: dict[str, Any] | None = None, *, options: bool = False) -> vol.Schema:
     defaults = defaults or {}
     fields: dict[Any, Any] = {
         vol.Required(CONF_NAME, default=defaults.get(CONF_NAME, DEFAULT_NAME)): str,
@@ -87,10 +97,33 @@ def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             CONF_SYNC_OFFSET_MS,
             default=defaults.get(CONF_SYNC_OFFSET_MS, DEFAULT_SYNC_OFFSET_MS),
         ): vol.All(vol.Coerce(int), vol.Range(min=-2000, max=2000)),
+        vol.Required(
+            CONF_LYRIC_OFFSET_MS,
+            default=defaults.get(CONF_LYRIC_OFFSET_MS, DEFAULT_LYRIC_OFFSET_MS),
+        ): vol.All(vol.Coerce(int), vol.Range(min=-5000, max=5000)),
     }
     _add_optional_single_media_player(
         fields, CONF_VINYL_PLAYER, defaults.get(CONF_VINYL_PLAYER)
     )
+    if options:
+        fields[vol.Required(
+            CONF_DASHBOARD_PATH,
+            default=defaults.get(CONF_DASHBOARD_PATH, DEFAULT_DASHBOARD_PATH),
+        )] = str
+        fields[vol.Required(
+            CONF_VIEW_PATH,
+            default=defaults.get(CONF_VIEW_PATH, DEFAULT_VIEW_PATH),
+        )] = str
+        fields[vol.Required(
+            CONF_RECAST_WHILE_PLAYING,
+            default=defaults.get(
+                CONF_RECAST_WHILE_PLAYING, DEFAULT_RECAST_WHILE_PLAYING
+            ),
+        )] = bool
+        fields[vol.Required(
+            CONF_RECAST_INTERVAL,
+            default=defaults.get(CONF_RECAST_INTERVAL, DEFAULT_RECAST_INTERVAL),
+        )] = vol.All(vol.Coerce(float), vol.Range(min=15, max=300))
     return vol.Schema(fields)
 
 
@@ -146,4 +179,6 @@ class SpinJamOptionsFlow(config_entries.OptionsFlow):
         # Prefer displays; migrate legacy single display_entity into the form default.
         if not current.get(CONF_DISPLAYS) and current.get("display_entity"):
             current[CONF_DISPLAYS] = [current["display_entity"]]
-        return self.async_show_form(step_id="init", data_schema=_schema(current))
+        return self.async_show_form(
+            step_id="init", data_schema=_schema(current, options=True)
+        )

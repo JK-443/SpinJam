@@ -12,6 +12,7 @@ from custom_components.spinjam.const import (
     CONF_DISPLAY_ENTITY,
     CONF_DISPLAYS,
     CONF_LYRICS_ENABLED,
+    CONF_RECAST_WHILE_PLAYING,
     CONF_SOURCE_PLAYERS,
     CONF_SYNC_OFFSET_MS,
     DOMAIN,
@@ -38,6 +39,7 @@ def _entry(**overrides):
         ],
         CONF_LYRICS_ENABLED: False,
         CONF_SYNC_OFFSET_MS: 0,
+        CONF_RECAST_WHILE_PLAYING: False,
     }
     data.update(overrides)
     return MockConfigEntry(
@@ -106,11 +108,17 @@ async def test_start_validates_display_and_fires_event(hass: HomeAssistant) -> N
 
     # Skip refresh debounce in start by stubbing request_refresh.
     coordinator.async_request_refresh = AsyncMock()  # type: ignore[method-assign]
-    target = await coordinator.async_start("media_player.bedroom_tv")
+    with patch(
+        "custom_components.spinjam.coordinator.async_show_now_playing",
+        new_callable=AsyncMock,
+        return_value=True,
+    ):
+        target = await coordinator.async_start("media_player.bedroom_tv")
     assert target == "media_player.bedroom_tv"
     assert coordinator.selected_display == "media_player.bedroom_tv"
     await hass.async_block_till_done()
     assert events and events[-1]["display"] == "media_player.bedroom_tv"
+    await coordinator.async_shutdown()
     await hass.async_stop()
 
 
@@ -122,7 +130,12 @@ async def test_stop_fires_event(hass: HomeAssistant) -> None:
     coordinator.selected_display = coordinator.displays[0]
     events: list[dict] = []
     hass.bus.async_listen(EVENT_SPINJAM_STOP, lambda e: events.append(e.data))
-    await coordinator.async_stop()
+    with patch(
+        "custom_components.spinjam.coordinator.async_end_cast",
+        new_callable=AsyncMock,
+        return_value=True,
+    ):
+        await coordinator.async_stop()
     await hass.async_block_till_done()
     assert events and events[-1].get("display") == "media_player.living_room_tv"
     await hass.async_stop()
@@ -180,6 +193,7 @@ async def test_schema_includes_displays() -> None:
             "displays": ["media_player.living_room_tv"],
             "lyrics_enabled": True,
             "sync_offset_ms": 0,
+            "lyric_offset_ms": 0,
         }
     )
     assert data[CONF_DISPLAYS] == ["media_player.living_room_tv"]

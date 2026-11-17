@@ -75,11 +75,11 @@ def test_priority_picks_first_playing() -> None:
 
 
 def test_playing_beats_higher_priority_paused() -> None:
-    """Paused porch (#2) must not beat playing media_room (#5)."""
+    """Paused speaker_a (#2) must not beat playing speaker_b (#5)."""
     snaps = [
         SourceSnapshot(entity_id="media_player.kitchen", state="idle"),
         SourceSnapshot(
-            entity_id="media_player.back_porch",
+            entity_id="media_player.speaker_a",
             state="paused",
             title="Paused Track",
             artist="Artist P",
@@ -88,7 +88,7 @@ def test_playing_beats_higher_priority_paused() -> None:
         SourceSnapshot(entity_id="media_player.bedroom", state="idle"),
         SourceSnapshot(entity_id="media_player.office", state="idle"),
         SourceSnapshot(
-            entity_id="media_player.media_room",
+            entity_id="media_player.speaker_b",
             state="playing",
             title="Playing Track",
             artist="Artist M",
@@ -99,16 +99,16 @@ def test_playing_beats_higher_priority_paused() -> None:
         snaps,
         priority=[
             "media_player.kitchen",
-            "media_player.back_porch",
+            "media_player.speaker_a",
             "media_player.bedroom",
             "media_player.office",
-            "media_player.media_room",
+            "media_player.speaker_b",
         ],
         vinyl_entity_id=None,
         sync_offset_ms=0,
     )
     assert active is not None
-    assert active.entity_id == "media_player.media_room"
+    assert active.entity_id == "media_player.speaker_b"
     assert active.playing is True
     assert active.title == "Playing Track"
 
@@ -116,28 +116,28 @@ def test_playing_beats_higher_priority_paused() -> None:
 def test_only_paused_picks_highest_priority() -> None:
     snaps = [
         SourceSnapshot(
-            entity_id="media_player.back_porch",
+            entity_id="media_player.speaker_a",
             state="paused",
-            title="Porch Song",
+            title="Speaker A Song",
             artist="A",
         ),
         SourceSnapshot(
-            entity_id="media_player.media_room",
+            entity_id="media_player.speaker_b",
             state="paused",
-            title="Room Song",
+            title="Speaker B Song",
             artist="B",
         ),
     ]
     active = select_active_source(
         snaps,
-        priority=["media_player.back_porch", "media_player.media_room"],
+        priority=["media_player.speaker_a", "media_player.speaker_b"],
         vinyl_entity_id=None,
         sync_offset_ms=0,
     )
     assert active is not None
-    assert active.entity_id == "media_player.back_porch"
+    assert active.entity_id == "media_player.speaker_a"
     assert active.playing is False
-    assert active.title == "Porch Song"
+    assert active.title == "Speaker A Song"
 
 
 def test_two_playing_uses_list_order() -> None:

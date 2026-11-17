@@ -2,7 +2,7 @@
 # Copy to config.yaml on the Pi and edit.
 
 mqtt:
-  host: 192.168.1.10          # Mosquitto / HA broker (example LAN IP)
+  host: mqtt.example.local    # Mosquitto / HA broker hostname or IP
   port: 1883
   username: null              # or "mqtt_user"
   password: null

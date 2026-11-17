@@ -29,6 +29,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from homeassistant.const import Platform
 
     from .coordinator import SpinJamCoordinator
+    from .frontend import async_setup_frontend
+
+    await async_setup_frontend(hass)
 
     coordinator = SpinJamCoordinator(hass, entry)
     await coordinator.async_setup()

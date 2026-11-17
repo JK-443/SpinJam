@@ -31,7 +31,7 @@ spinjam -c config.yaml --no-shazam --no-realtime
 Or:
 
 ```bash
-spinjam -c config.yaml --file fixtures/sample_music.wav --no-shazam --no-realtime --mqtt-host 192.168.x.x
+spinjam -c config.yaml --file fixtures/sample_music.wav --no-shazam --no-realtime --mqtt-host mqtt.example.local
 ```
 
 Watch HA → MQTT devices for **SpinJam Turntable**, or subscribe:

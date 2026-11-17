@@ -25,6 +25,7 @@ def test_config_schema_requires_sources() -> None:
             "source_players": ["media_player.living_room", "media_player.kitchen"],
             "lyrics_enabled": True,
             "sync_offset_ms": 0,
+            "lyric_offset_ms": 0,
         }
     )
     # Order is preserved as priority; UI reorder keeps user order when supported.
