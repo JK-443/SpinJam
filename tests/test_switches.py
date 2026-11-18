@@ -9,7 +9,9 @@ import pytest
 from custom_components.spinjam.const import (
     CONF_BUILTIN_CASTING,
     CONF_DISPLAYS,
+    CONF_HD_ARTWORK,
     CONF_LYRICS_ENABLED,
+    CONF_PREFETCH,
     CONF_RECAST_ON_STARTUP,
     CONF_RECAST_WHILE_PLAYING,
     CONF_SOURCE_PLAYERS,
@@ -39,6 +41,8 @@ def _entry(**overrides):
         CONF_RECAST_WHILE_PLAYING: False,
         CONF_BUILTIN_CASTING: True,
         CONF_RECAST_ON_STARTUP: False,
+        CONF_HD_ARTWORK: False,
+        CONF_PREFETCH: False,
     }
     data.update(overrides)
     return MockConfigEntry(

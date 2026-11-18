@@ -10,7 +10,16 @@ import voluptuous as vol
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
-from .const import DEFAULT_DASHBOARD_PATH, DEFAULT_VIEW_PATH, DOMAIN
+from .const import (
+    DEFAULT_DASHBOARD_PATH,
+    DEFAULT_VIEW_PATH,
+    DOMAIN,
+    NUMBER_LYRIC_OFFSET_ENTITY_ID,
+    SELECT_DISPLAY_ENTITY_ID,
+    SWITCH_CAST_ENTITY_ID,
+    SWITCH_LYRICS_ENTITY_ID,
+    SWITCH_TRACKING_ENTITY_ID,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -21,15 +30,48 @@ DETAILS_CARD = {
     "type": "custom:spinjam-lyrics-card",
     "entity": "media_player.spinjam_now_playing",
     "mode": "details",
-    "offset_entity": "number.spinjam_lyric_offset",
+    "offset_entity": NUMBER_LYRIC_OFFSET_ENTITY_ID,
 }
 
 LYRICS_CARD = {
     "type": "custom:spinjam-lyrics-card",
     "entity": "media_player.spinjam_now_playing",
     "mode": "lyrics",
-    "offset_entity": "number.spinjam_lyric_offset",
+    "offset_entity": NUMBER_LYRIC_OFFSET_ENTITY_ID,
 }
+
+CONTROLS_TILES = [
+    {
+        "type": "tile",
+        "entity": SWITCH_CAST_ENTITY_ID,
+        "name": "SpinJam",
+        "icon": "mdi:cast",
+    },
+    {
+        "type": "tile",
+        "entity": SWITCH_TRACKING_ENTITY_ID,
+        "name": "Tracking",
+        "icon": "mdi:radar",
+    },
+    {
+        "type": "tile",
+        "entity": SWITCH_LYRICS_ENTITY_ID,
+        "name": "Lyrics",
+        "icon": "mdi:microphone-variant",
+    },
+    {
+        "type": "tile",
+        "entity": SELECT_DISPLAY_ENTITY_ID,
+        "name": "Display",
+        "icon": "mdi:television",
+    },
+    {
+        "type": "tile",
+        "entity": NUMBER_LYRIC_OFFSET_ENTITY_ID,
+        "name": "Lyric offset",
+        "icon": "mdi:timer-outline",
+    },
+]
 
 
 def validate_dashboard_url_path(value: Any) -> str:
@@ -74,6 +116,16 @@ def spinjam_tv_view_config(view_path: str) -> dict[str, Any]:
     }
 
 
+def spinjam_controls_view_config() -> dict[str, Any]:
+    """Masonry view of SpinJam control tiles (cast / tracking / lyrics / …)."""
+    return {
+        "title": "Controls",
+        "path": "controls",
+        "type": "masonry",
+        "cards": [dict(tile) for tile in CONTROLS_TILES],
+    }
+
+
 async def async_create_spinjam_dashboard(
     hass: HomeAssistant,
     *,
@@ -85,7 +137,7 @@ async def async_create_spinjam_dashboard(
 
     Uses Lovelace's ``DashboardsCollection`` the same way HA creates the map
     dashboard. Safe to call repeatedly: existing dashboards are updated in place.
-    Layout: details card left, lyrics card right.
+    Layout: details card left, lyrics card right; plus a Controls view with tiles.
     """
     path = validate_dashboard_url_path(dashboard_path or DEFAULT_DASHBOARD_PATH)
     view = (view_path or DEFAULT_VIEW_PATH).strip() or DEFAULT_VIEW_PATH
@@ -118,7 +170,9 @@ async def async_create_spinjam_dashboard(
     if store is None:
         raise HomeAssistantError(f"Dashboard {path} was not registered after create")
 
-    config = {"views": [spinjam_tv_view_config(view)]}
+    config = {
+        "views": [spinjam_tv_view_config(view), spinjam_controls_view_config()],
+    }
     try:
         await store.async_save(config)
     except Exception as err:  # noqa: BLE001

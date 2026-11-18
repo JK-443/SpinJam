@@ -20,6 +20,8 @@ CONF_RECAST_INTERVAL = "recast_interval"
 CONF_BUILTIN_CASTING = "builtin_casting"
 CONF_RECAST_ON_STARTUP = "recast_on_startup"
 CONF_POWER_OFF_DISPLAY_ON_STOP = "power_off_display_on_stop"
+CONF_HD_ARTWORK = "hd_artwork"
+CONF_PREFETCH = "prefetch"
 
 DEFAULT_NAME = "SpinJam Now Playing"
 DEFAULT_SYNC_OFFSET_MS = 0
@@ -34,6 +36,8 @@ DEFAULT_RECAST_INTERVAL = 45.0
 DEFAULT_BUILTIN_CASTING = True
 DEFAULT_RECAST_ON_STARTUP = False
 DEFAULT_POWER_OFF_DISPLAY_ON_STOP = False
+DEFAULT_HD_ARTWORK = True
+DEFAULT_PREFETCH = True
 
 # Options keys that can change live without reloading the config entry.
 LIVE_OPTIONS_KEYS = frozenset({CONF_SYNC_OFFSET_MS, CONF_LYRIC_OFFSET_MS})
@@ -55,6 +59,10 @@ ATTR_DISPLAYS = "displays"
 ATTR_SELECTED_DISPLAY = "selected_display"
 ATTR_SYNC_OFFSET_MS = "sync_offset_ms"
 ATTR_ALBUM_LOCK = "album_lock"
+ATTR_ARTWORK_HD = "artwork_hd"
+ATTR_ARTWORK_SOURCE = "artwork_source"
+ATTR_ARTWORK_NEXT = "artwork_next"
+ATTR_LYRICS_ENABLED = "lyrics_enabled"
 
 SERVICE_IDENTIFY = "identify"
 SERVICE_SET_SYNC_OFFSET = "set_sync_offset"
@@ -125,7 +133,11 @@ LYRICS_CACHE_SIZE = 64
 SELECT_DISPLAY_ENTITY_ID = "select.spinjam_display"
 SWITCH_CAST_ENTITY_ID = "switch.spinjam_cast"
 SWITCH_TRACKING_ENTITY_ID = "switch.spinjam_tracking"
+SWITCH_LYRICS_ENTITY_ID = "switch.spinjam_lyrics"
 NUMBER_LYRIC_OFFSET_ENTITY_ID = "number.spinjam_lyric_offset"
+
+ARTWORK_DISK_CACHE_DIR = "spinjam"
+ARTWORK_DISK_CACHE_FILE = "artwork_cache.json"
 
 # lyric_lines attribute: hard cap; window keeps context around the current line.
 LYRIC_LINES_ATTR_MAX = 120
