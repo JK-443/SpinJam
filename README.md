@@ -44,7 +44,7 @@ When a configured Sonos/Port player’s source is **Line-in**, SpinJam uses the 
 6. Optionally select **Displays** (Google Cast targets), e.g. `media_player.example_tv`
 7. Enable lyrics; leave sync / lyric offsets at `0` until you calibrate
 
-The TV card ships with the integration (`/spinjam/spinjam-lyrics-card.js?v=…`, modes `details` / `lyrics`) — no separate frontend install. With lyrics off, the Cast view is one full-width stage instead of two panels. `spinjam-now-playing-card` remains a deprecated alias.
+The TV card ships with the integration (`/spinjam/spinjam-lyrics-card.js?v=…`). The Cast view is one full-screen card (`mode: cast`): lyrics on is the split layout, lyrics off is the full-bleed stage. `spinjam-now-playing-card` remains a deprecated alias.
 
 ### Option B — Manual
 

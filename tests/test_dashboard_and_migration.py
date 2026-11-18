@@ -19,10 +19,13 @@ from custom_components.spinjam.const import (
     LEGACY_DASHBOARD_PATH,
 )
 from custom_components.spinjam.dashboard import (
+    CAST_CARD,
     DETAILS_CARD,
     LYRICS_CARD,
     async_create_spinjam_dashboard,
+    upgrade_cast_view,
     upgrade_controls_cards,
+    upgrade_dashboard_config,
     spinjam_tv_view_config,
     validate_dashboard_url_path,
 )
@@ -141,18 +144,104 @@ async def test_create_dashboard_upgrades_in_place_twice(hass: HomeAssistant) -> 
     assert controls_again["cards"] == snapshot
 
 
-def test_tv_view_layout_details_left_lyrics_right() -> None:
+def _generated_pair() -> list[dict]:
+    return [dict(DETAILS_CARD), dict(LYRICS_CARD)]
+
+
+def test_tv_view_is_one_fullscreen_cast_card() -> None:
     view = spinjam_tv_view_config("now")
     assert view["type"] == "panel"
+    assert view["panel"] is True
     assert view["path"] == "now"
-    stack = view["cards"][0]
-    assert stack["type"] == "horizontal-stack"
-    left, right = stack["cards"]
-    assert left["type"] == "custom:spinjam-lyrics-card"
-    assert left["mode"] == "details"
-    assert right["mode"] == "lyrics"
-    assert left["offset_entity"] == "number.spinjam_lyric_offset"
-    assert right["offset_entity"] == DETAILS_CARD["offset_entity"] == LYRICS_CARD["offset_entity"]
+    assert len(view["cards"]) == 1
+    card = view["cards"][0]
+    assert card["type"] == "custom:spinjam-lyrics-card"
+    assert card["mode"] == "cast"
+    assert card == CAST_CARD
+    assert card["offset_entity"] == DETAILS_CARD["offset_entity"] == LYRICS_CARD["offset_entity"]
+
+
+def test_cast_view_migration_replaces_two_card_stack(caplog: pytest.LogCaptureFixture) -> None:
+    original = {
+        "views": [
+            {
+                "title": "Now",
+                "path": "now",
+                "type": "panel",
+                "cards": [
+                    {"type": "horizontal-stack", "cards": _generated_pair()},
+                ],
+            }
+        ]
+    }
+    with caplog.at_level("INFO"):
+        once = upgrade_dashboard_config(original)
+        twice = upgrade_dashboard_config(once)
+    view = once["views"][0]
+    assert view["type"] == "panel"
+    assert view["panel"] is True
+    assert view["cards"] == [CAST_CARD]
+    assert "sections" not in view
+    assert twice["views"][0] == view
+    assert sum("full-screen card" in rec.message for rec in caplog.records) == 1
+
+
+def test_cast_view_migration_keeps_user_cards(caplog: pytest.LogCaptureFixture) -> None:
+    user = {"type": "markdown", "content": "A note on the cast view"}
+    view = {
+        "title": "Now",
+        "path": "now",
+        "type": "panel",
+        "cards": [
+            {"type": "horizontal-stack", "cards": _generated_pair()},
+            user,
+        ],
+    }
+    with caplog.at_level("INFO"):
+        migrated, notes = upgrade_cast_view(view)
+        again, notes_again = upgrade_cast_view(migrated)
+    assert migrated["cards"][0] == CAST_CARD
+    assert migrated["cards"][1] == user
+    assert again["cards"] == migrated["cards"]
+    assert notes_again == []
+    assert notes
+    assert any("left other cards alone" in note or "full-screen card" in note for note in notes)
+    assert any("full-screen card" in rec.message for rec in caplog.records) or notes
+
+
+def test_cast_view_migration_sections_become_a_panel() -> None:
+    view = {
+        "title": "Now",
+        "path": "now",
+        "icon": "mdi:album",
+        "type": "sections",
+        "sections": [
+            {"type": "grid", "cards": _generated_pair()},
+        ],
+    }
+    migrated, notes = upgrade_cast_view(view)
+    again, notes_again = upgrade_cast_view(migrated)
+    assert migrated["type"] == "panel"
+    assert migrated["panel"] is True
+    assert migrated["icon"] == "mdi:album"
+    assert "sections" not in migrated
+    assert migrated["cards"] == [CAST_CARD]
+    assert notes_again == []
+    assert again == migrated
+    assert notes
+
+
+def test_cast_view_migration_ignores_unrelated_views() -> None:
+    weather = {
+        "title": "Weather",
+        "path": "weather",
+        "type": "masonry",
+        "cards": [{"type": "weather-forecast", "entity": "weather.home"}],
+    }
+    migrated, notes = upgrade_cast_view(weather)
+    assert notes == []
+    assert migrated["cards"] == weather["cards"]
+    assert migrated["title"] == "Weather"
 
 
 @pytest.mark.asyncio

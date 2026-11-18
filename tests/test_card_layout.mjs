@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  CARD_MODE_CAST,
   CARD_MODE_DETAILS,
   CARD_MODE_HIDDEN,
   CARD_MODE_LYRICS,
   CARD_MODE_STAGE,
+  slotLayoutPatch,
   LAYOUT_TRANSITION_MS,
   STAGE_ART_HEIGHT_RATIO,
   resolveCardPresentation,
@@ -33,6 +35,45 @@ test("lyrics on keeps the two-panel layout", () => {
   assert.equal(lyrics.mode, CARD_MODE_LYRICS);
   assert.equal(lyrics.collapseSlot, false);
   assert.equal(lyrics.expandSlot, false);
+});
+
+test("cast mode is one card: split when lyrics are on, stage when off", () => {
+  const on = resolveCardPresentation({
+    configuredMode: "cast",
+    lyricsEnabled: true,
+  });
+  const off = resolveCardPresentation({
+    configuredMode: "cast",
+    lyricsEnabled: false,
+    siblingShowsStage: true,
+  });
+  assert.equal(on.mode, CARD_MODE_CAST);
+  assert.equal(on.fullBleed, true);
+  assert.equal(on.collapseSlot, false);
+  assert.equal(off.mode, CARD_MODE_STAGE);
+  assert.equal(off.fullBleed, true);
+  assert.equal(off.collapseSlot, false);
+  assert.equal(off.expandSlot, false);
+});
+
+test("a leftover lyrics card collapses its grid column when lyrics are off", () => {
+  const hidden = resolveCardPresentation({
+    configuredMode: "lyrics",
+    lyricsEnabled: false,
+    siblingShowsStage: true,
+  });
+  const patch = slotLayoutPatch(hidden, "grid");
+  assert.equal(hidden.mode, CARD_MODE_HIDDEN);
+  assert.equal(patch.hostDisplay, "none");
+  assert.equal(patch.slotDisplay, "none");
+  assert.equal(patch.parentGridTemplateColumns, "1fr");
+  const stage = resolveCardPresentation({
+    configuredMode: "details",
+    lyricsEnabled: false,
+  });
+  const expanded = slotLayoutPatch(stage, "grid");
+  assert.equal(expanded.slotGridColumn, "1 / -1");
+  assert.equal(expanded.slotWidth, "100%");
 });
 
 test("missing lyrics_enabled stays in lyrics mode (default on)", () => {

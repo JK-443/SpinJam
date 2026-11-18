@@ -45,6 +45,21 @@ LYRICS_CARD = {
     "offset_entity": NUMBER_LYRIC_OFFSET_ENTITY_ID,
 }
 
+# One card owns lyrics-on (split) and lyrics-off (full-bleed stage).
+CAST_CARD = {
+    "type": "custom:spinjam-lyrics-card",
+    "entity": "media_player.spinjam_now_playing",
+    "mode": "cast",
+    "offset_entity": NUMBER_LYRIC_OFFSET_ENTITY_ID,
+}
+
+SPINJAM_TV_CARD_TYPES = frozenset(
+    {
+        "custom:spinjam-lyrics-card",
+        "custom:spinjam-now-playing-card",
+    }
+)
+
 def _tile(entity: str, name: str, icon: str) -> dict[str, Any]:
     return {"type": "tile", "entity": entity, "name": name, "icon": icon}
 
@@ -151,17 +166,13 @@ def dashboard_exists(hass: HomeAssistant, url_path: str) -> bool:
 
 
 def spinjam_tv_view_config(view_path: str) -> dict[str, Any]:
-    """Panel view: details (left) + lyrics (right) via horizontal-stack."""
+    """Full-screen panel: one card for the split lyrics layout and the stage."""
     return {
         "title": "Now",
         "path": view_path,
         "type": "panel",
-        "cards": [
-            {
-                "type": "horizontal-stack",
-                "cards": [dict(DETAILS_CARD), dict(LYRICS_CARD)],
-            }
-        ],
+        "panel": True,
+        "cards": [dict(CAST_CARD)],
     }
 
 
@@ -247,10 +258,133 @@ def _controls_view_index(views: list[Any]) -> int | None:
     return None
 
 
+def _is_spinjam_tv_card(card: Any) -> bool:
+    return isinstance(card, dict) and card.get("type") in SPINJAM_TV_CARD_TYPES
+
+
+def _is_cast_card(card: Any) -> bool:
+    return (
+        isinstance(card, dict)
+        and card.get("type") == "custom:spinjam-lyrics-card"
+        and card.get("mode") == "cast"
+    )
+
+
+def _is_generated_pair(cards: Any) -> bool:
+    """The old left/right Cast row: exactly two SpinJam TV cards."""
+    if not isinstance(cards, list) or len(cards) != 2:
+        return False
+    return all(_is_spinjam_tv_card(card) for card in cards)
+
+
+def _leaf_cards(node: Any) -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = []
+    if isinstance(node, list):
+        for item in node:
+            found.extend(_leaf_cards(item))
+        return found
+    if not isinstance(node, dict):
+        return found
+    nested = False
+    for key in ("cards", "sections"):
+        if isinstance(node.get(key), list):
+            nested = True
+            found.extend(_leaf_cards(node[key]))
+    if not nested and node.get("type"):
+        found.append(node)
+    return found
+
+
+def _replace_pair_containers(node: Any, notes: list[str]) -> Any:
+    """Replace a stack/grid that is only the old two-card row. Leave other cards."""
+    if isinstance(node, list):
+        return [_replace_pair_containers(item, notes) for item in node]
+    if not isinstance(node, dict):
+        return node
+    cards = node.get("cards")
+    if isinstance(cards, list) and _is_generated_pair(cards):
+        if node.get("type") in {"horizontal-stack", "vertical-stack", "stack"}:
+            notes.append("replaced a two-card SpinJam stack with one full-screen card")
+            return dict(CAST_CARD)
+        notes.append(
+            "replaced a two-card SpinJam row with one full-screen card; left other cards alone"
+        )
+        return {**node, "cards": [dict(CAST_CARD)]}
+    updated = dict(node)
+    if isinstance(cards, list):
+        updated["cards"] = [_replace_pair_containers(item, notes) for item in cards]
+    if isinstance(node.get("sections"), list):
+        updated["sections"] = [
+            _replace_pair_containers(item, notes) for item in node["sections"]
+        ]
+    return updated
+
+
+def _panel_cast_view(view: dict[str, Any]) -> dict[str, Any]:
+    kept = {key: value for key, value in view.items() if key not in ("cards", "sections", "type")}
+    kept["type"] = "panel"
+    kept["panel"] = True
+    kept["cards"] = [dict(CAST_CARD)]
+    return kept
+
+
+def upgrade_cast_view(view: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Turn a generated two-card Cast view into one full-screen panel card.
+
+    A view that is only that pair (nested in a stack, grid, or sections) becomes
+    ``type: panel`` / ``panel: true`` with a single ``mode: cast`` card.
+    Other cards in the same view stay put.
+    """
+    if not isinstance(view, dict):
+        return view, []
+    cards = view.get("cards")
+    if (
+        isinstance(cards, list)
+        and len(cards) == 1
+        and _is_cast_card(cards[0])
+        and not view.get("sections")
+        and view.get("type") == "panel"
+        and view.get("panel") is True
+    ):
+        return view, []
+
+    leaves = _leaf_cards(view)
+    spinjam = [card for card in leaves if _is_spinjam_tv_card(card)]
+    others = [card for card in leaves if not _is_spinjam_tv_card(card)]
+    if len(spinjam) == 2 and not others and _is_generated_pair(spinjam):
+        return _panel_cast_view(view), [
+            "replaced the two-card cast layout with one full-screen card"
+        ]
+    if len(spinjam) == 1 and _is_cast_card(spinjam[0]) and not others:
+        if view.get("type") == "panel" and view.get("panel") is True and not view.get("sections"):
+            return view, []
+        updated = _panel_cast_view(view)
+        return updated, ["marked the cast view as a full-screen panel"]
+
+    notes: list[str] = []
+    replaced = _replace_pair_containers(view, notes)
+    return replaced if isinstance(replaced, dict) else view, notes
+
+
+def upgrade_cast_views(views: list[Any]) -> tuple[list[Any], list[str]]:
+    updated: list[Any] = []
+    notes: list[str] = []
+    for view in views:
+        if not isinstance(view, dict):
+            updated.append(view)
+            continue
+        new_view, view_notes = upgrade_cast_view(view)
+        path = new_view.get("path") or new_view.get("title") or "view"
+        notes.extend(f"{path}: {note}" for note in view_notes)
+        updated.append(new_view)
+    return updated, notes
+
+
 def upgrade_dashboard_config(config: dict[str, Any]) -> dict[str, Any]:
-    """Upgrade the Controls view in place. Other views are not rewritten."""
+    """Upgrade the Cast view and the Controls view in place."""
     raw_views = config.get("views")
     views = list(raw_views) if isinstance(raw_views, list) else []
+    views, cast_notes = upgrade_cast_views(views)
     index = _controls_view_index(views)
     if index is None:
         views.append(spinjam_controls_view_config())
@@ -259,6 +393,8 @@ def upgrade_dashboard_config(config: dict[str, Any]) -> dict[str, Any]:
         existing = view.get("cards")
         view["cards"] = upgrade_controls_cards(list(existing) if isinstance(existing, list) else [])
         views[index] = view
+    for note in cast_notes:
+        _LOGGER.info("SpinJam dashboard layout: %s", note)
     updated = dict(config)
     updated["views"] = views
     return updated
