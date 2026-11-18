@@ -27,3 +27,10 @@ views:
             entity: media_player.spinjam_now_playing
             mode: lyrics
             offset_entity: number.spinjam_lyric_offset
+  # Optional phone/desktop header (not cast to the TV panel above):
+  # - title: About
+  #   path: about
+  #   cards:
+  #     - type: markdown
+  #       content: |
+  #         ![SpinJam](/spinjam/spinjam-icon.png)

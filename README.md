@@ -1,5 +1,9 @@
 # SpinJam
 
+<p align="center">
+  <img src="images/logo-1024.png" alt="SpinJam" width="220" />
+</p>
+
 **General now-playing for Home Assistant.** SpinJam aggregates Music Assistant, Sonos, and a vinyl MQTT capture node into one unified `media_player`, with optional LRCLIB synced lyrics and Cast to a TV. Vinyl recognition runs on a dedicated Pi — never on the HA host.
 
 ## Pieces
@@ -10,8 +14,10 @@
 | [`spinjam/`](spinjam) | Vinyl capture/recognition MQTT node (Pi) |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System design |
 | [`docs/TV_CAST.md`](docs/TV_CAST.md) | TV now-playing card + Cast setup |
+| [`docs/BRANDING.md`](docs/BRANDING.md) | Logo / brand images (local `brand/` + HACS) |
 | [`docs/PHASE0_HARDWARE.md`](docs/PHASE0_HARDWARE.md) | Port OUT → UCA202 cabling |
 | [`docs/FIXTURE_MODE.md`](docs/FIXTURE_MODE.md) | Test vinyl node without USB hardware |
+| [`images/`](images/) | Logo pack (`logo-1024.png`, icons, source) |
 
 ```
 Music Assistant / Sonos media_players ──┐
