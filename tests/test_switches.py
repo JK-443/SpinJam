@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -413,6 +415,49 @@ async def test_options_schema_includes_builtin_casting() -> None:
     assert data[CONF_BUILTIN_CASTING] is False
     assert data[CONF_RECAST_ON_STARTUP] is True
     assert data[CONF_POWER_OFF_DISPLAY_ON_STOP] is True
+
+
+@pytest.mark.asyncio
+async def test_cast_turn_on_returns_before_slow_cast(hass: HomeAssistant) -> None:
+    """switch.turn_on must not wait on wake, launch, verify, or refresh."""
+    entry = _entry(unique_id=f"{DOMAIN}_cast_fast")
+    entry.add_to_hass(hass)
+    coordinator = SpinJamCoordinator(hass, entry)
+    coordinator.selected_display = coordinator.displays[0]
+
+    from custom_components.spinjam.switch import SpinJamCastSwitch
+
+    switch = SpinJamCastSwitch(coordinator, entry)
+
+    async def _slow(*_args, **_kwargs):
+        await asyncio.sleep(1.2)
+        return True
+
+    started = time.monotonic()
+    with (
+        patch(
+            "custom_components.spinjam.coordinator.async_wake_display",
+            side_effect=_slow,
+        ),
+        patch(
+            "custom_components.spinjam.coordinator.async_show_now_playing",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch(
+            "custom_components.spinjam.coordinator.async_wait_for_lovelace_app",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+    ):
+        await switch.async_turn_on()
+        elapsed = time.monotonic() - started
+        assert elapsed < 1
+        assert switch.is_on is True
+        await hass.async_block_till_done()
+    assert switch.is_on is True
+    await coordinator.async_shutdown()
+    await hass.async_stop()
 
 
 def test_cast_switch_is_restore_entity() -> None:

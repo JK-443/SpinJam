@@ -339,3 +339,161 @@ async def test_start_skips_non_cast_display(hass: HomeAssistant) -> None:
     assert coordinator.cast_active is True
     await coordinator.async_shutdown()
     await hass.async_stop()
+
+
+def _entities(node) -> list[str]:
+    found: list[str] = []
+    if isinstance(node, list):
+        for item in node:
+            found.extend(_entities(item))
+        return found
+    if isinstance(node, dict):
+        entity = node.get("entity")
+        if isinstance(entity, str):
+            found.append(entity)
+        for key in ("cards", "sections", "entities"):
+            if isinstance(node.get(key), list):
+                found.extend(_entities(node[key]))
+    return found
+
+
+def test_upgrade_controls_sections_is_idempotent() -> None:
+    view = {
+        "title": "Controls",
+        "path": "controls",
+        "type": "sections",
+        "sections": [
+            {
+                "type": "grid",
+                "cards": [
+                    {
+                        "type": "tile",
+                        "entity": "switch.spinjam_cast",
+                        "name": "Cast",
+                    },
+                    {
+                        "type": "horizontal-stack",
+                        "cards": [
+                            {
+                                "type": "custom:button-card",
+                                "entity": "button.spinjam_lyrics_earlier",
+                                "name": "Earlier",
+                            },
+                            {
+                                "type": "button",
+                                "entity": "button.spinjam_lyrics_later",
+                                "name": "Later",
+                            },
+                            {
+                                "type": "tile",
+                                "entity": "number.spinjam_lyric_offset",
+                                "name": "Delay",
+                            },
+                        ],
+                    },
+                    {"type": "markdown", "content": "user note"},
+                ],
+            }
+        ],
+    }
+    once = upgrade_dashboard_config({"views": [view]})
+    twice = upgrade_dashboard_config(once)
+    controls = once["views"][0]
+    assert "cards" not in controls or not controls.get("cards")
+    entities = _entities(controls)
+    assert entities.count("switch.spinjam_cast") == 1
+    assert entities.count("select.spinjam_display") == 1
+    assert entities.count("select.spinjam_source") == 1
+    assert entities.count("switch.spinjam_lyrics") == 1
+    assert entities.count("button.spinjam_lyrics_earlier") == 1
+    assert entities.count("number.spinjam_lyric_offset") == 1
+    assert twice["views"][0] == controls
+    section_cards = controls["sections"][0]["cards"]
+    assert any(card.get("content") == "user note" for card in section_cards)
+    assert not any(
+        card.get("type") == "horizontal-stack"
+        and card.get("cards")
+        and card["cards"][0].get("entity") == "button.spinjam_lyrics_earlier"
+        and len(card.get("cards") or []) == 3
+        and card["cards"][1].get("entity") == "sensor.spinjam_lyric_delay"
+        for card in section_cards
+    )
+
+
+class _LovelaceData:
+    """Stand-in for HA's LovelaceData (not a dict)."""
+
+    def __init__(self, dashboards: dict, collection: object | None = None) -> None:
+        self.dashboards = dashboards
+        self.dashboards_collection = collection
+        self.resources = None
+
+
+@pytest.mark.asyncio
+async def test_upgrade_reads_lovelace_data_object(hass: HomeAssistant) -> None:
+    from custom_components.spinjam.dashboard import async_upgrade_configured_dashboard
+
+    class _Store:
+        def __init__(self) -> None:
+            self.config = {
+                "views": [
+                    {
+                        "title": "Controls",
+                        "path": "controls",
+                        "cards": [
+                            {"type": "tile", "entity": "switch.spinjam_cast", "name": "Cast"},
+                        ],
+                    }
+                ]
+            }
+
+        async def async_load(self, force: bool = False) -> dict:
+            _ = force
+            return self.config
+
+        async def async_save(self, config: dict) -> None:
+            self.config = config
+
+    store = _Store()
+    hass.data["lovelace"] = _LovelaceData({"spinjam-tv": store}, object())
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_NAME: "SpinJam",
+            CONF_SOURCE_PLAYERS: ["media_player.living_room"],
+            CONF_DASHBOARD_PATH: "spinjam-tv",
+        },
+        unique_id=f"{DOMAIN}_lovelace_data",
+    )
+    assert await async_upgrade_configured_dashboard(hass, entry) is True
+    entities = [card.get("entity") for card in store.config["views"][0]["cards"]]
+    assert "select.spinjam_display" in entities
+    assert "select.spinjam_source" in entities
+    again = [dict(card) for card in store.config["views"][0]["cards"]]
+    assert await async_upgrade_configured_dashboard(hass, entry) is True
+    assert store.config["views"][0]["cards"] == again
+
+
+@pytest.mark.asyncio
+async def test_upgrade_logs_when_lovelace_dashboards_missing(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    from custom_components.spinjam.dashboard import async_upgrade_configured_dashboard
+
+    hass.data["lovelace"] = object()
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_NAME: "SpinJam",
+            CONF_SOURCE_PLAYERS: ["media_player.living_room"],
+            CONF_DASHBOARD_PATH: "spinjam-tv",
+        },
+        unique_id=f"{DOMAIN}_lovelace_skip",
+    )
+    with caplog.at_level("INFO"):
+        assert await async_upgrade_configured_dashboard(hass, entry) is False
+    assert any(
+        "dashboard upgrade skipped" in rec.message.lower()
+        and rec.levelname == "INFO"
+        for rec in caplog.records
+    )

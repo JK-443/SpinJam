@@ -13,6 +13,9 @@ import {
   resolveCardPresentation,
   stageArtSizePx,
   stageMissingArt,
+  CAST_LYRIC_PAD_RATIO,
+  LYRIC_EMPHASIS_SCALE,
+  castLyricLineMaxPx,
   formatLyricDelay,
   formatLyricDelaySeconds,
   lyricDelayToast,
@@ -154,6 +157,16 @@ test("lyric delay label and toast name the direction", () => {
   assert.equal(formatLyricDelay(0), "0.0 s (on time)");
   assert.equal(lyricDelayToast(2000, 2250), "Lyrics +250 ms later, now +2.25 s");
   assert.equal(lyricDelayToast(2000, 1750), "Lyrics -250 ms earlier, now +1.75 s");
+});
+
+test("cast lyric line fits the pane after padding and the scale-up", () => {
+  assert.equal(CAST_LYRIC_PAD_RATIO, 0.04);
+  const pane = 960;
+  const inner = pane * (1 - CAST_LYRIC_PAD_RATIO * 2);
+  const max = castLyricLineMaxPx(inner);
+  assert.ok(max > 0);
+  assert.ok(max * LYRIC_EMPHASIS_SCALE <= inner + 0.01);
+  assert.equal(castLyricLineMaxPx(0), 0);
 });
 
 test("narrow card still keeps a square that fits the width", () => {

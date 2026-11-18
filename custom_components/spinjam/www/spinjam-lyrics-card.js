@@ -30,6 +30,8 @@ import {
   stageMissingArt,
   LAYOUT_TRANSITION_MS,
   lyricDelayToast,
+  castLyricLineMaxPx,
+  LYRIC_EMPHASIS_SCALE,
 } from "./spinjam-card-layout.js";
 
 const SJ_WORD_TAG = /<(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?>/g;
@@ -323,7 +325,19 @@ class SpinJamLyricsCard extends HTMLElement {
           position: relative; inset: auto; flex: 1 1 50%; width: 50%; height: 100%;
           min-width: 0; opacity: 1; visibility: visible; pointer-events: auto;
         }
-        :host([mode="cast"]) .lyrics-pane { flex: 1 1 50%; width: 50%; height: 100%; }
+        :host([mode="cast"]) .lyrics-pane {
+          flex: 1 1 50%; width: 50%; height: 100%;
+          box-sizing: border-box;
+          padding: 0 4%;
+          overflow: hidden;
+        }
+        :host([mode="cast"]) .vp,
+        :host([mode="cast"]) ul,
+        :host([mode="cast"]) li { max-width: 100%; box-sizing: border-box; }
+        :host([mode="cast"]) li.cur {
+          max-width: calc(100% / ${LYRIC_EMPHASIS_SCALE});
+          margin-left: auto; margin-right: auto;
+        }
         :host([mode="cast"]) .stage { opacity: 0; visibility: hidden; pointer-events: none; }
         :host([mode="hidden"]) { display: none !important; }
         :host([mode="hidden"]) ha-card { visibility: hidden; }
@@ -941,24 +955,40 @@ class SpinJamLyricsCard extends HTMLElement {
       else if (d < 0) cls = "past";
       else if (d <= 3) cls = "n" + d;
       items[i].className = cls;
-      if (d !== 0 && items[i].style.fontSize) items[i].style.fontSize = "";
+      if (d !== 0) {
+        if (items[i].style.fontSize) items[i].style.fontSize = "";
+        if (items[i].style.maxWidth) items[i].style.maxWidth = "";
+      }
     }
     this._fitRows();
     // Big jumps (seek / new song) snap; normal line changes glide.
     this._scroll(prev >= -1 && Math.abs(idx - prev) <= 3);
   }
 
-  /* Keep the current line to 2 rows: step its size down if it wraps further. */
+  /* Keep the current line to 2 rows, and inside the padded pane after scale-up. */
   _fitRows() {
     const li = this._idx >= 0 ? this._ul.children[this._idx] : null;
     if (!li) return;
+    const cast = this.getAttribute("mode") === "cast";
+    const inner = cast && this._ul ? this._ul.clientWidth : 0;
+    const budget = cast ? castLyricLineMaxPx(inner) : 0;
+    if (budget > 0) {
+      li.style.maxWidth = `${Math.floor(budget)}px`;
+      li.style.marginLeft = "auto";
+      li.style.marginRight = "auto";
+      li.style.boxSizing = "border-box";
+    } else if (li.style.maxWidth) {
+      li.style.maxWidth = "";
+    }
     li.style.fontSize = "";
     const base = parseFloat(getComputedStyle(li).fontSize) || 30;
-    for (let f = 1; f >= 0.7; f -= 0.075) {
+    for (let f = 1; f >= 0.55; f -= 0.05) {
       li.style.fontSize = f === 1 ? "" : `${Math.round(base * f)}px`;
       const lh = parseFloat(getComputedStyle(li).lineHeight) || base * 1.25;
       const pad = parseFloat(getComputedStyle(li).paddingTop) * 2;
-      if ((li.offsetHeight - pad) / lh < 2.5) break;
+      const rowsOk = (li.offsetHeight - pad) / lh < 2.5;
+      const fits = !(budget > 0 && li.scrollWidth > budget + 1);
+      if (rowsOk && fits) break;
     }
   }
 

@@ -94,7 +94,7 @@ from .const import (
     MQTT_CMD_SELECT_ALBUM,
     MQTT_CMD_SYNC_OFFSET,
 )
-from .frontend import card_file_hash
+from .frontend import async_get_card_file_hash
 from .lyrics import (
     LrcLibClient,
     LyricsCache,
@@ -199,6 +199,7 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         self._lyrics_task: asyncio.Task[Any] | None = None
         self._lyrics_task_key: str | None = None
         self._artwork: ArtworkResolver | None = None
+        self._artwork_disk: Any = None
         self._unsub_state: Any = None
         self._tracked: list[str] = []
         self._last_artwork_key: str | None = None
@@ -413,13 +414,31 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         )
         self._publish_lyrics_state()
 
+    def _artwork_disk_path(self) -> Any:
+        from pathlib import Path
+
+        return Path(self.hass.config.path(ARTWORK_DISK_CACHE_DIR, ARTWORK_DISK_CACHE_FILE))
+
+    async def _async_preload_artwork_disk(self) -> None:
+        """Read the artwork cache off the loop, without opening an HTTP session."""
+        from .artwork import ArtworkDiskCache
+
+        disk = ArtworkDiskCache(self._artwork_disk_path())
+        disk.bind(self.hass)
+        await self.hass.async_add_executor_job(disk.load)
+        self._artwork_disk = disk
+
     def _artwork_resolver(self) -> ArtworkResolver:
         if self._artwork is None:
-            from pathlib import Path
+            from .artwork import ArtworkDiskCache
 
-            disk = Path(self.hass.config.path(ARTWORK_DISK_CACHE_DIR, ARTWORK_DISK_CACHE_FILE))
+            disk = self._artwork_disk
+            if disk is None:
+                disk = ArtworkDiskCache(self._artwork_disk_path())
+                disk.bind(self.hass)
+                self._artwork_disk = disk
             self._artwork = ArtworkResolver(
-                async_get_clientsession(self.hass), disk_path=disk
+                async_get_clientsession(self.hass), disk=disk
             )
         return self._artwork
 
@@ -515,6 +534,7 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         return self.selected_source_entity_id or SOURCE_AUTOMATIC
 
     async def async_setup(self) -> None:
+        await self._async_preload_artwork_disk()
         self._async_watch_sources()
         if self.displays and self.selected_display is None:
             self.selected_display = self.displays[0]
@@ -551,6 +571,10 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         if self._unsub_state:
             self._unsub_state()
             self._unsub_state = None
+        if self._artwork is not None:
+            await self._artwork.async_flush()
+        elif self._artwork_disk is not None:
+            await self._artwork_disk.async_flush()
 
     def _async_cancel_prefetch(self) -> None:
         task = self._prefetch_task
@@ -1005,7 +1029,7 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             self._last_publish_fingerprint = self._data_fingerprint(self.data)
 
     async def async_set_tracking(
-        self, enabled: bool, *, from_cast_stop: bool = False
+        self, enabled: bool, *, from_cast_stop: bool = False, refresh: bool = True
     ) -> None:
         """Enable or pause source following.
 
@@ -1013,6 +1037,9 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         ``async_stop`` turns it off. There is no tracking switch. Turning
         tracking off while Cast is active still stops Cast, so an internal
         caller cannot leave a cast session without now-playing.
+
+        ``refresh`` is False on the Cast start path so ``switch.turn_on``
+        can return before the refresh, wake, and launch finish.
         """
         enabled = bool(enabled)
         if not enabled and self._cast_active and not from_cast_stop:
@@ -1026,7 +1053,8 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             self._async_watch_sources()
             # Immediate refresh. async_request_refresh is debounced and can
             # miss the on-transition if another refresh just ran.
-            await self.async_refresh()
+            if refresh:
+                await self.async_refresh()
         else:
             self.update_interval = None
             if self._unsub_state:
@@ -1111,12 +1139,13 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
                 f"{target} is not a configured SpinJam display. Choose one of: {', '.join(configured)}"
             )
         if self.display_select is not None:
-            await self.display_select.async_select_option(target)
+            await self.display_select.async_select_option(target, refresh=False)
         else:
             self.selected_display = target
 
-        # Casting always enables tracking (master on).
-        await self.async_set_tracking(True)
+        # Casting always enables tracking (master on). The refresh itself runs
+        # in the background task below so turn_on is not blocked by it.
+        await self.async_set_tracking(True, refresh=False)
 
         opts = cast_options(self._options())
         do_builtin = self.builtin_casting
@@ -1134,30 +1163,64 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         self._async_cancel_cast_start_task()
         self._async_set_cast_active(True, target)
         self.hass.bus.async_fire(EVENT_SPINJAM_START, {"display": target})
-        await self.async_request_refresh()
 
-        if do_builtin:
-            self._cast_start_task = self._async_create_cast_start_task(
-                self._async_cast_start_job(
-                    target,
-                    dashboard_path=str(opts[CONF_DASHBOARD_PATH]),
-                    view_path=str(opts[CONF_VIEW_PATH]),
-                    opts=opts,
-                )
+        self._cast_start_task = self._async_create_cast_start_task(
+            self._async_start_background(
+                target,
+                do_builtin=do_builtin,
+                dashboard_path=str(opts[CONF_DASHBOARD_PATH]),
+                view_path=str(opts[CONF_VIEW_PATH]),
+                opts=opts,
             )
-        else:
-            self._async_stop_recast()
-
+        )
         return target
 
+    async def _async_start_background(
+        self,
+        target: str,
+        *,
+        do_builtin: bool,
+        dashboard_path: str,
+        view_path: str,
+        opts: dict[str, Any],
+    ) -> None:
+        """Refresh, then wake, launch, and verify.
+
+        Yield once before any of that work. Home Assistant starts tasks
+        eagerly, so without this the blocking Cast call would run inside
+        ``switch.turn_on``.
+        """
+        await asyncio.sleep(0)
+        try:
+            try:
+                await self.async_refresh()
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("SpinJam refresh during start failed", exc_info=True)
+            if not do_builtin:
+                self._async_stop_recast()
+                return
+            await self._async_cast_start_job(
+                target,
+                dashboard_path=dashboard_path,
+                view_path=view_path,
+                opts=opts,
+            )
+        finally:
+            if self._cast_start_task is asyncio.current_task():
+                self._cast_start_task = None
+
     def _async_create_cast_start_task(self, coro: Any) -> asyncio.Task[Any]:
-        """Schedule wake/launch/verify off the switch turn_on path."""
+        """Schedule wake/launch/verify off the switch turn_on path.
+
+        A normal task, not ``async_create_background_task``. Those start
+        eagerly and ``async_block_till_done`` does not wait for them, so the
+        Cast ``turn_on`` ran inside the switch call again. The coroutine
+        yields once before the slow work, and stop/shutdown cancel this task.
+        """
         name = f"{DOMAIN}_cast_start"
-        if hasattr(self.entry, "async_create_background_task"):
-            return self.entry.async_create_background_task(self.hass, coro, name)
-        if hasattr(self.hass, "async_create_background_task"):
-            return self.hass.async_create_background_task(coro, name)
-        return self.hass.async_create_task(coro)
+        return self.hass.async_create_task(coro, name)
 
     async def _async_cast_start_job(
         self,
@@ -1331,7 +1394,7 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         view_path: str,
     ) -> bool:
         """Wake, cast, and verify Lovelace — quit first when card JS changed."""
-        version = card_file_hash()
+        version = await async_get_card_file_hash(self.hass)
         last = self._cast_card_version_by_display.get(entity_id)
         if last is not None and last != version:
             _LOGGER.info(

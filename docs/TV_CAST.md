@@ -99,7 +99,7 @@ Device page order: **Cast**, **Display**, **Source**, **Lyrics**, **Now Playing*
 | Entity | Behaviour |
 | --- | --- |
 | `switch.spinjam_cast` | On → wake display if needed, cast Lovelace, enable tracking (`spinjam.start`). Off → quit Cast app, disable tracking, clear now-playing to idle (`spinjam.stop`). Tracking follows this switch. |
-| `select.spinjam_display` | Which configured display to use. |
+| `select.spinjam_display` | Which configured display to use. Options are friendly names; a restored entity id still selects the same display. |
 | `select.spinjam_source` | `Automatic` (default) or one configured player by friendly name, plus the vinyl player when configured. A fixed choice is the only now-playing source. Restored across restarts. Options refresh when sources change. |
 | `switch.spinjam_lyrics` | Off stops lyric fetches and switches the TV card live to one full-width stage. On restores the two-panel lyrics layout. Restored; default on. No Cast restart. |
 | `number.spinjam_lyric_offset` | **Lyric delay** in ms (**higher = lyrics appear later**). Configuration entity. Live — no reload. Restored. Range −5000…5000, step 100. |

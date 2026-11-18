@@ -34,6 +34,44 @@ def remote_entity_for_media_player(hass: HomeAssistant, entity_id: str) -> str |
     return None
 
 
+def _is_closed_transport(err: BaseException) -> bool:
+    """True when pychromecast/websocket closed while a write was in flight."""
+    current: BaseException | None = err
+    seen: list[int] = []
+    while current is not None and id(current) not in seen:
+        seen.append(id(current))
+        message = str(current).lower()
+        if "closing transport" in message or "closed transport" in message:
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+async def _async_service_call(
+    hass: HomeAssistant,
+    domain: str,
+    service: str,
+    data: dict[str, Any],
+    *,
+    blocking: bool,
+) -> None:
+    """Call a service, retrying once when the Cast socket is already closing."""
+    for attempt in (1, 2):
+        try:
+            await hass.services.async_call(domain, service, data, blocking=blocking)
+            return
+        except Exception as err:
+            if attempt == 1 and _is_closed_transport(err):
+                _LOGGER.debug(
+                    "%s.%s hit a closed transport; retrying once: %s",
+                    domain,
+                    service,
+                    err,
+                )
+                continue
+            raise
+
+
 def _is_display_on(hass: HomeAssistant, entity_id: str) -> bool:
     state = hass.states.get(entity_id)
     return state is not None and state.state not in _OFF_LIKE
@@ -62,7 +100,8 @@ async def async_wake_display(
 
     if hass.services.has_service("media_player", "turn_on"):
         try:
-            await hass.services.async_call(
+            await _async_service_call(
+                hass,
                 "media_player",
                 "turn_on",
                 {"entity_id": entity_id},
@@ -135,7 +174,8 @@ async def async_show_now_playing(
         )
         return False
     try:
-        await hass.services.async_call(
+        await _async_service_call(
+            hass,
             "cast",
             "show_lovelace_view",
             {
@@ -163,7 +203,8 @@ async def async_end_cast(hass: HomeAssistant, entity_id: str) -> bool:
     if not hass.services.has_service("media_player", "turn_off"):
         return False
     try:
-        await hass.services.async_call(
+        await _async_service_call(
+            hass,
             "media_player",
             "turn_off",
             {"entity_id": entity_id},

@@ -25,6 +25,7 @@ from .const import (
     SWITCH_LYRICS_ENTITY_ID,
     SWITCH_TRACKING_ENTITY_ID,
 )
+from .frontend import lovelace_value
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -106,21 +107,19 @@ def lyric_delay_row() -> dict[str, Any]:
     }
 
 
-def _has_lyric_delay_row(cards: list[Any]) -> bool:
-    for card in cards:
-        if not isinstance(card, dict) or card.get("type") != "horizontal-stack":
-            continue
-        entities = {
-            child.get("entity")
-            for child in (card.get("cards") or [])
-            if isinstance(child, dict)
-        }
-        if (
-            BUTTON_LYRICS_EARLIER_ENTITY_ID in entities
-            and BUTTON_LYRICS_LATER_ENTITY_ID in entities
-        ):
-            return True
-    return False
+# A tile, button, or button-card for any of these already is the lyric-delay
+# control, including when it sits inside a section or a stack.
+_LYRIC_DELAY_ENTITIES = frozenset(
+    {
+        NUMBER_LYRIC_OFFSET_ENTITY_ID,
+        BUTTON_LYRICS_EARLIER_ENTITY_ID,
+        BUTTON_LYRICS_LATER_ENTITY_ID,
+        BUTTON_LYRIC_DELAY_RESET_ENTITY_ID,
+        SENSOR_LYRIC_DELAY_ENTITY_ID,
+    }
+)
+
+_NESTED_CARD_KEYS = ("cards", "sections")
 
 # Added when missing on an existing dashboard. Lyric offset is kept if the
 # user already has it and is not put back after they remove it.
@@ -156,13 +155,32 @@ def validate_dashboard_url_path(value: Any) -> str:
     return path
 
 
+def _lovelace_dashboards(hass: HomeAssistant) -> Any:
+    """Dashboards mapping from ``LovelaceData`` or a legacy dict."""
+    return lovelace_value(hass, "dashboards")
+
+
+def _dashboard_store(dashboards: Any, url_path: str) -> Any:
+    if dashboards is None:
+        return None
+    getter = getattr(dashboards, "get", None)
+    if callable(getter):
+        return getter(url_path)
+    try:
+        return dashboards[url_path]
+    except (KeyError, TypeError, IndexError):
+        return None
+
+
 def dashboard_exists(hass: HomeAssistant, url_path: str) -> bool:
     """Return True if a Lovelace dashboard is registered for url_path."""
-    lovelace = hass.data.get("lovelace")
-    if not isinstance(lovelace, dict):
+    dashboards = _lovelace_dashboards(hass)
+    if dashboards is None:
         return False
-    dashboards = lovelace.get("dashboards") or {}
-    return url_path in dashboards
+    try:
+        return url_path in dashboards
+    except TypeError:
+        return False
 
 
 def spinjam_tv_view_config(view_path: str) -> dict[str, Any]:
@@ -218,14 +236,34 @@ def _without_tracking(card: dict[str, Any]) -> dict[str, Any] | None:
     return card
 
 
-def upgrade_controls_cards(cards: list[Any]) -> list[Any]:
-    """Remove the tracking tile, append missing SpinJam tiles, drop duplicates.
+def _collect_entities(node: Any, found: set[str] | None = None) -> set[str]:
+    """Entity ids on this card and inside stacks, grids, and sections."""
+    found = found if found is not None else set()
+    if isinstance(node, list):
+        for item in node:
+            _collect_entities(item, found)
+        return found
+    if not isinstance(node, dict):
+        return found
+    entity = node.get("entity")
+    if isinstance(entity, str):
+        found.add(entity)
+    entities = node.get("entities")
+    if isinstance(entities, list):
+        for item in entities:
+            if isinstance(item, str):
+                found.add(item)
+            else:
+                _collect_entities(item, found)
+    for key in _NESTED_CARD_KEYS:
+        if isinstance(node.get(key), list):
+            _collect_entities(node[key], found)
+    return found
 
-    Cards the user added (anything that is not a SpinJam control entity) are
-    left in place, including their position relative to tiles that stay.
-    """
+
+def _upgrade_card_list(cards: list[Any], seen_managed: set[str]) -> list[Any]:
+    """Strip tracking and duplicate managed tiles, walking nested cards."""
     result: list[Any] = []
-    seen: set[str] = set()
     for card in cards:
         if not isinstance(card, dict):
             result.append(card)
@@ -233,19 +271,80 @@ def upgrade_controls_cards(cards: list[Any]) -> list[Any]:
         stripped = _without_tracking(card)
         if stripped is None:
             continue
+        if any(isinstance(stripped.get(key), list) for key in _NESTED_CARD_KEYS):
+            stripped = dict(stripped)
+            for key in _NESTED_CARD_KEYS:
+                nested = stripped.get(key)
+                if isinstance(nested, list):
+                    stripped[key] = _upgrade_card_list(nested, seen_managed)
         entity = _card_entity(stripped)
         if entity in MANAGED_CONTROL_ENTITIES:
-            if entity in seen:
+            if entity in seen_managed:
                 continue
-            seen.add(entity)
+            seen_managed.add(entity)
         result.append(stripped)
-    for tile in REQUIRED_CONTROL_TILES:
-        if tile["entity"] not in seen:
-            result.append(dict(tile))
-            seen.add(tile["entity"])
-    if not _has_lyric_delay_row(result):
-        result.append(lyric_delay_row())
     return result
+
+
+def _append_target(view: dict[str, Any]) -> list[Any]:
+    """Where new control tiles go: the card list, or the first section."""
+    cards = view.get("cards")
+    sections = view.get("sections")
+    if isinstance(sections, list) and sections and not cards:
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            if not isinstance(section.get("cards"), list):
+                section["cards"] = []
+            return section["cards"]
+    if not isinstance(cards, list):
+        view["cards"] = []
+    return view["cards"]
+
+
+def upgrade_controls_view(view: dict[str, Any]) -> dict[str, Any]:
+    """Upgrade one Controls view, including sections and nested stacks.
+
+    Cast, Display, Source, and Lyrics match by entity, so a tile already
+    sitting in a section or a stack is not added again. An existing tile,
+    button, or button-card for the lyric delay number or the delay buttons
+    counts as the delay row.
+    """
+    view = dict(view)
+    seen_managed: set[str] = set()
+    if isinstance(view.get("cards"), list):
+        view["cards"] = _upgrade_card_list(view["cards"], seen_managed)
+    if isinstance(view.get("sections"), list):
+        sections: list[Any] = []
+        for section in view["sections"]:
+            if not isinstance(section, dict):
+                sections.append(section)
+                continue
+            section = dict(section)
+            if isinstance(section.get("cards"), list):
+                section["cards"] = _upgrade_card_list(section["cards"], seen_managed)
+            sections.append(section)
+        view["sections"] = sections
+    present = _collect_entities(view)
+    seen_managed.update(present & MANAGED_CONTROL_ENTITIES)
+    dest = _append_target(view)
+    for tile in REQUIRED_CONTROL_TILES:
+        if tile["entity"] not in seen_managed:
+            dest.append(dict(tile))
+            seen_managed.add(tile["entity"])
+    if not (present & _LYRIC_DELAY_ENTITIES):
+        dest.append(lyric_delay_row())
+    return view
+
+
+def upgrade_controls_cards(cards: list[Any]) -> list[Any]:
+    """Remove the tracking tile, append missing SpinJam tiles, drop duplicates.
+
+    Cards the user added (anything that is not a SpinJam control entity) are
+    left in place, including their position relative to tiles that stay.
+    Nested stacks and grids are walked the same way as a sections view.
+    """
+    return list(upgrade_controls_view({"cards": list(cards)}).get("cards") or [])
 
 
 def _controls_view_index(views: list[Any]) -> int | None:
@@ -389,10 +488,7 @@ def upgrade_dashboard_config(config: dict[str, Any]) -> dict[str, Any]:
     if index is None:
         views.append(spinjam_controls_view_config())
     else:
-        view = dict(views[index])
-        existing = view.get("cards")
-        view["cards"] = upgrade_controls_cards(list(existing) if isinstance(existing, list) else [])
-        views[index] = view
+        views[index] = upgrade_controls_view(views[index])
     for note in cast_notes:
         _LOGGER.info("SpinJam dashboard layout: %s", note)
     updated = dict(config)
@@ -442,13 +538,16 @@ async def async_create_spinjam_dashboard(
     path = validate_dashboard_url_path(dashboard_path or DEFAULT_DASHBOARD_PATH)
     view = (view_path or DEFAULT_VIEW_PATH).strip() or DEFAULT_VIEW_PATH
 
-    lovelace = hass.data.get("lovelace")
-    if not isinstance(lovelace, dict) or "dashboards_collection" not in lovelace:
+    dashboards = _lovelace_dashboards(hass)
+    collection = lovelace_value(hass, "dashboards_collection")
+    if dashboards is None or collection is None:
+        _LOGGER.info(
+            "SpinJam dashboard create skipped: Lovelace dashboards are not available"
+        )
         raise HomeAssistantError(
             "Lovelace is not available — enable the Lovelace/default dashboard system first"
         )
 
-    collection = lovelace["dashboards_collection"]
     created = False
     if not dashboard_exists(hass, path):
         try:
@@ -466,7 +565,7 @@ async def async_create_spinjam_dashboard(
         except Exception as err:  # noqa: BLE001
             raise HomeAssistantError(f"Could not create dashboard {path}: {err}") from err
 
-    store = lovelace["dashboards"].get(path)
+    store = _dashboard_store(dashboards, path)
     if store is None:
         raise HomeAssistantError(f"Dashboard {path} was not registered after create")
 
@@ -505,13 +604,19 @@ async def async_upgrade_configured_dashboard(hass: HomeAssistant, entry: Any) ->
         path = validate_dashboard_url_path(raw_path)
     except vol.Invalid:
         return False
+    dashboards = _lovelace_dashboards(hass)
+    if dashboards is None:
+        _LOGGER.info(
+            "SpinJam dashboard upgrade skipped: Lovelace dashboards are not available"
+        )
+        return False
     if not dashboard_exists(hass, path):
         return False
-    lovelace = hass.data.get("lovelace")
-    if not isinstance(lovelace, dict):
-        return False
-    store = (lovelace.get("dashboards") or {}).get(path)
+    store = _dashboard_store(dashboards, path)
     if store is None:
+        _LOGGER.info(
+            "SpinJam dashboard upgrade skipped: no config store for %s", path
+        )
         return False
     loaded = await _async_load_dashboard_config(store)
     if not loaded or not loaded.get("views"):

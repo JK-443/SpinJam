@@ -290,6 +290,45 @@ class SourceChoice:
     entity_id: str | None  # None → automatic ranking
 
 
+def build_display_choices(
+    displays: list[tuple[str, str | None, str | None]],
+) -> list[SourceChoice]:
+    """Friendly names for ``select.spinjam_display``.
+
+    ``displays`` is ``(entity_id, friendly_name, area_name)`` in config order.
+    Duplicate names gain the area when that makes them unique, otherwise the
+    entity id. The choice's ``entity_id`` is what Cast still uses.
+    """
+    prepared: list[tuple[str, str, str]] = []
+    seen_ids: set[str] = set()
+    for entity_id, friendly_name, area_name in displays:
+        if not entity_id or entity_id in seen_ids:
+            continue
+        seen_ids.add(entity_id)
+        base = (friendly_name or "").strip() or _fallback_source_label(entity_id)
+        area = (area_name or "").strip()
+        prepared.append((entity_id, base, area))
+
+    base_counts: dict[str, int] = {}
+    for _entity_id, base, _area in prepared:
+        base_counts[base] = base_counts.get(base, 0) + 1
+
+    choices: list[SourceChoice] = []
+    used: set[str] = set()
+    for entity_id, base, area in prepared:
+        if base_counts[base] == 1:
+            label = base
+        elif area:
+            label = f"{base} ({area})"
+        else:
+            label = f"{base} ({entity_id})"
+        if label in used:
+            label = f"{base} ({entity_id})"
+        used.add(label)
+        choices.append(SourceChoice(label, entity_id))
+    return choices
+
+
 def build_source_choices(
     players: list[tuple[str, str | None]],
 ) -> list[SourceChoice]:
