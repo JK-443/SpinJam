@@ -43,4 +43,5 @@ HA runs on a Pi 4 that is (or was) memory-starved. The integration must stay lig
 - `aiohttp` via Home Assistant’s shared session only
 - Small in-memory LRU for lyrics and artwork URLs (URLs only — images are not downloaded on the HA host); optional tiny on-disk artwork URL cache under the config dir
 - Event-driven updates + a low-frequency lyric tick while playing
-- Vanilla JS TV card (no Lit); `lyric_lines` capped (~120) and windowed around the current position; optional per-line `words` from LRCLIB enhanced tags
+- `media_position` attribute writes are throttled (track/play changes, >1 s seeks, or every 30 s) so Cast clients are not re-anchored every second; the TV card clock compensates for delivery delay and never steps lyrics/progress backward within a track
+- Vanilla JS TV card (no Lit); `lyric_lines` capped (~120) and windowed around the current position; optional per-line `words` from LRCLIB enhanced tags; clock logic in `spinjam-playback-clock.js`

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -158,6 +159,10 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         # Last SpinJam card JS version cast to each display (Cast caches resources).
         self._cast_card_version_by_display: dict[str, str] = {}
         self._last_publish_fingerprint: tuple[Any, ...] | None = None
+        # Position attribute publish throttle (avoid 1 Hz media_position writes).
+        self._last_pos_write_mono: float | None = None
+        self._last_pos_write_value: float | None = None
+        self._awaiting_mpua_after_track: datetime | None = None
 
     def _client(self) -> LrcLibClient:
         if self._lyrics_client is None:
@@ -408,12 +413,17 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         if CONF_LYRIC_OFFSET_MS in options:
             lyric_offset = int(options.get(CONF_LYRIC_OFFSET_MS, lyric_offset))
 
-        active = select_active_source(
+        prev_active = self.data.active if self.data else None
+        hold = prev_active if prev_active and prev_active.playing else None
+        live_active = select_active_source(
             self._collect_snapshots(),
             priority=self.source_players,
             vinyl_entity_id=self.vinyl_player,
             sync_offset_ms=sync_offset,
+            hold=hold,
         )
+        # Throttle media_position attribute writes; keep a live estimate for lyrics.
+        active = self._throttle_position_publish(live_active, prev_active)
 
         lyrics: LyricsResult | None = None
         lyric_current = None
@@ -423,22 +433,25 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         artwork_source = self.data.artwork_source if self.data else None
         artwork_next = self.data.artwork_next if self.data else None
 
-        if active and self.lyrics_enabled and active.artist and active.title:
-            key = f"{active.artist}|{active.title}|{active.album}|{active.duration}"
+        if live_active and self.lyrics_enabled and live_active.artist and live_active.title:
+            key = (
+                f"{live_active.artist}|{live_active.title}|"
+                f"{live_active.album}|{live_active.duration}"
+            )
             if key != self._last_lyrics_key or self.data.lyrics is None:
                 lyrics = await self._client().fetch(
-                    artist=active.artist,
-                    title=active.title,
-                    album=active.album,
-                    duration=active.duration,
+                    artist=live_active.artist,
+                    title=live_active.title,
+                    album=live_active.album,
+                    duration=live_active.duration,
                 )
                 self._last_lyrics_key = key
             else:
                 lyrics = self.data.lyrics
             lyric_pos = None
-            if active.position is not None:
+            if live_active.position is not None:
                 # Positive lyric_offset_ms = lyrics appear later → look earlier in LRC.
-                lyric_pos = max(0.0, active.position - (lyric_offset / 1000.0))
+                lyric_pos = max(0.0, live_active.position - (lyric_offset / 1000.0))
                 if lyrics:
                     lyric_current, lyric_next = line_at(lyrics.lines, lyric_pos)
             if lyrics:
@@ -453,16 +466,16 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         else:
             self._last_lyrics_key = None
 
-        if active and self.hd_artwork_enabled and (active.artist or active.title):
-            art_key = f"{active.artist}|{active.album}|{active.title}"
+        if live_active and self.hd_artwork_enabled and (live_active.artist or live_active.title):
+            art_key = f"{live_active.artist}|{live_active.album}|{live_active.title}"
             if art_key != self._last_artwork_key:
                 try:
                     art = await self._artwork_resolver().resolve(
-                        artist=active.artist,
-                        title=active.title,
-                        album=active.album,
-                        duration=active.duration,
-                        entity_picture=active.art_url,
+                        artist=live_active.artist,
+                        title=live_active.title,
+                        album=live_active.album,
+                        duration=live_active.duration,
+                        entity_picture=live_active.art_url,
                     )
                 except Exception:  # noqa: BLE001 — never block now-playing on art lookup
                     _LOGGER.debug("HD artwork resolve failed", exc_info=True)
@@ -472,13 +485,13 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
                     artwork_hd = art.url
                     artwork_source = art.source
                 else:
-                    artwork_hd = active.art_url
-                    artwork_source = "entity_picture" if active.art_url else None
-            elif not artwork_hd and active.art_url:
-                artwork_hd = active.art_url
+                    artwork_hd = live_active.art_url
+                    artwork_source = "entity_picture" if live_active.art_url else None
+            elif not artwork_hd and live_active.art_url:
+                artwork_hd = live_active.art_url
                 artwork_source = artwork_source or "entity_picture"
         elif not self.hd_artwork_enabled:
-            artwork_hd = active.art_url if active else None
+            artwork_hd = live_active.art_url if live_active else None
             artwork_source = "entity_picture" if artwork_hd else None
             self._last_artwork_key = None
         else:
@@ -490,26 +503,10 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         if self.display_select is not None:
             self.display_select._sync_options_from_coordinator()  # noqa: SLF001
 
-        # Only refresh the position clock when the source exposes media_position.
-        # Sources like TV audio would otherwise force a state write every second.
-        if active and active.position is not None:
-            position_updated_at = datetime.now(timezone.utc)
-        elif active:
-            prev = self.data.active if self.data else None
-            same_track = (
-                prev is not None
-                and prev.entity_id == active.entity_id
-                and prev.title == active.title
-                and prev.artist == active.artist
-            )
-            position_updated_at = (
-                self.data.position_updated_at if same_track else None
-            )
-        else:
-            position_updated_at = None
+        position_updated_at = self._position_updated_at_for_publish(active, prev_active)
 
-        if active and self.prefetch_enabled:
-            self._schedule_prefetch(active)
+        if live_active and self.prefetch_enabled:
+            self._schedule_prefetch(live_active)
         else:
             self._async_cancel_prefetch()
             artwork_next = None
@@ -533,6 +530,110 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
                 lyrics_enabled=self.lyrics_enabled,
             )
         )
+
+    def _same_track(self, left: ActiveSource | None, right: ActiveSource | None) -> bool:
+        if left is None or right is None:
+            return False
+        return (
+            left.entity_id == right.entity_id
+            and left.title == right.title
+            and left.artist == right.artist
+        )
+
+    def _throttle_position_publish(
+        self, active: ActiveSource | None, prev: ActiveSource | None
+    ) -> ActiveSource | None:
+        """Limit media_position attribute churn; wait for fresh m_p_u_a on track change."""
+        if active is None:
+            self._last_pos_write_mono = None
+            self._last_pos_write_value = None
+            self._awaiting_mpua_after_track = None
+            return None
+
+        track_changed = not self._same_track(prev, active)
+        play_changed = prev is not None and prev.playing != active.playing
+
+        if track_changed:
+            # Hold the first position until the source reports a new m_p_u_a.
+            prev_mpua = prev.position_updated_at if prev else None
+            self._awaiting_mpua_after_track = prev_mpua
+            if active.position is None or active.position_updated_at is None:
+                return replace(active, position=None)
+            if prev_mpua is not None and active.position_updated_at <= prev_mpua:
+                return replace(active, position=None)
+            self._awaiting_mpua_after_track = None
+            self._last_pos_write_mono = time.monotonic()
+            self._last_pos_write_value = active.position
+            return active
+
+        if self._awaiting_mpua_after_track is not None:
+            if (
+                active.position is None
+                or active.position_updated_at is None
+                or active.position_updated_at <= self._awaiting_mpua_after_track
+            ):
+                return replace(active, position=None)
+            self._awaiting_mpua_after_track = None
+            self._last_pos_write_mono = time.monotonic()
+            self._last_pos_write_value = active.position
+            return active
+
+        if active.position is None:
+            return active
+
+        if play_changed:
+            self._last_pos_write_mono = time.monotonic()
+            self._last_pos_write_value = active.position
+            return active
+
+        # Jump > 1s vs last published position (seek / skip).
+        if (
+            self._last_pos_write_value is not None
+            and abs(active.position - self._last_pos_write_value) > 1.0
+        ):
+            # Account for wall time since last write so normal playback isn't a "jump".
+            elapsed = 0.0
+            if self._last_pos_write_mono is not None:
+                elapsed = time.monotonic() - self._last_pos_write_mono
+            expected = self._last_pos_write_value + (
+                elapsed if active.playing else 0.0
+            )
+            if abs(active.position - expected) > 1.0:
+                self._last_pos_write_mono = time.monotonic()
+                self._last_pos_write_value = active.position
+                return active
+
+        # Periodic drift correction at most every 30s.
+        if (
+            self._last_pos_write_mono is None
+            or (time.monotonic() - self._last_pos_write_mono) >= 30.0
+        ):
+            self._last_pos_write_mono = time.monotonic()
+            self._last_pos_write_value = active.position
+            return active
+
+        # Hold the last published position so fingerprints stay stable mid-track.
+        if prev is not None and self._same_track(prev, active) and prev.position is not None:
+            return replace(active, position=prev.position)
+        return replace(active, position=None)
+
+    def _position_updated_at_for_publish(
+        self, active: ActiveSource | None, prev: ActiveSource | None
+    ) -> datetime | None:
+        """Publish a new position clock only when media_position itself is published."""
+        if active is None or active.position is None:
+            return None
+        if (
+            prev is not None
+            and self._same_track(prev, active)
+            and prev.position is not None
+            and active.position == prev.position
+            and self.data
+            and self.data.position_updated_at is not None
+        ):
+            # Reuse prior publish timestamp when holding the same position value.
+            return self.data.position_updated_at
+        return datetime.now(timezone.utc)
 
     async def _async_prefetch_for_active(self, active: ActiveSource) -> str | None:
         """Resolve and cache next-track assets; return next HD art URL if any."""

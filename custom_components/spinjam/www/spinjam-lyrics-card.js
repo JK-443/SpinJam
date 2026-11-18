@@ -16,6 +16,8 @@
  *  - Otherwise the card falls back to SpinJam's lyric_offset_ms with the same
  *    convention (positive = later → subtract from position).
  */
+import { PlaybackClock } from "./spinjam-playback-clock.js";
+
 const SJ_WORD_TAG = /<(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?>/g;
 
 class SpinJamLyricsCard extends HTMLElement {
@@ -27,6 +29,8 @@ class SpinJamLyricsCard extends HTMLElement {
     this._raf = null;
     this._frame = this._frame.bind(this);
     this._onResize = () => { this._fitHeight(); this._scroll(false); };
+    this._pbClock = new PlaybackClock();
+    this._lastLineIdx = -2;
   }
 
   static getStubConfig() {
@@ -71,35 +75,42 @@ class SpinJamLyricsCard extends HTMLElement {
   }
 
   /*
-   * Shared clock for the lyrics, sweep and progress bar.
-   * Position = media_position + (last_updated - media_position_updated_at), both
-   * server timestamps, then advanced with this device's monotonic clock from the
-   * moment the state arrived. The TV's wall clock is never compared with HA's, so
-   * a Chromecast whose clock is off doesn't freeze or skew the position.
+   * Shared clock for lyrics, sweep and progress (incl. cover layout).
+   * Delivery-delay aware: lat = now - last_updated; base = min lat over recent
+   * updates (cancels TV↔HA clock offset); arrival pos adds clamp(lat - base, 0, 2).
+   * Small errors are ignored; medium errors converge via ±10% speed; large errors
+   * / track changes hard-reset. Position never steps backward within a track.
    */
   _anchor(st) {
-    const nowPerf = performance.now();
-    if (!st) { this._clock = null; return; }
+    if (!st) {
+      this._pbClock.resetStats();
+      this._skew = null;
+      return;
+    }
     const a = st.attributes || {};
     const playing = st.state === "playing";
-    let pos = Number(a.media_position);
-    if (!Number.isFinite(pos)) { this._clock = null; return; }
+    const mediaPosition = Number(a.media_position);
+    if (!Number.isFinite(mediaPosition)) {
+      this._pbClock.resetStats();
+      return;
+    }
     const upd = Date.parse(a.media_position_updated_at || "");
     const lu = Date.parse(st.last_updated || "");
-    if (playing && !Number.isNaN(upd) && !Number.isNaN(lu)) pos += Math.max(0, (lu - upd) / 1000);
     this._skew = Number.isNaN(lu) ? null : (Date.now() - lu) / 1000;
-    if (this._clock && playing && this._clock.playing) {
-      const predicted = this._clock.pos + (nowPerf - this._clock.perf) / 1000;
-      // Ignore sub-250 ms re-anchors so the sweep doesn't twitch every second.
-      if (Math.abs(predicted - pos) < 0.25) return;
-    }
-    this._clock = { pos, perf: nowPerf, playing };
+    const trackKey = [a.media_title || "", a.media_artist || "", a.active_source || ""].join("|");
+    this._pbClock.observe({
+      mediaPosition,
+      mediaPositionUpdatedAtMs: Number.isNaN(upd) ? NaN : upd,
+      lastUpdatedMs: Number.isNaN(lu) ? NaN : lu,
+      nowMs: Date.now(),
+      nowPerf: performance.now(),
+      playing,
+      trackKey,
+    });
   }
 
   _now() {
-    const c = this._clock;
-    if (!c) return 0;
-    return Math.max(0, c.pos + (c.playing ? (performance.now() - c.perf) / 1000 : 0));
+    return this._pbClock.position(performance.now());
   }
 
   connectedCallback() {
@@ -568,6 +579,8 @@ class SpinJamLyricsCard extends HTMLElement {
   }
 
   _setIndex(idx) {
+    // Within a track, lyric line index never steps backward (clock may still seek forward).
+    if (this._idx >= 0 && idx >= 0 && idx < this._idx) return;
     if (idx === this._idx) return;
     const prev = this._idx;
     this._idx = idx;
@@ -656,8 +669,10 @@ class SpinJamLyricsCard extends HTMLElement {
     if (this._tr.textContent !== tr) this._tr.textContent = tr;
     if (this._cfg.debug) {
       const live = this._liveOffsetMs();
-      const d = `clock skew vs HA ${this._skew == null ? "?" : this._skew.toFixed(1)} s · ` +
-        (live !== null ? `live offset ${live > 0 ? "+" : ""}${live} ms (later)` : `SpinJam lyric_offset_ms`);
+      const dbg = this._pbClock.debug();
+      const d = `base ${dbg.base.toFixed(3)}s · lat ${dbg.lat.toFixed(3)}s · speed ${dbg.speed.toFixed(2)} · resets ${dbg.resetCount}` +
+        ` · skew ${this._skew == null ? "?" : this._skew.toFixed(1)}s` +
+        (live !== null ? ` · live offset ${live > 0 ? "+" : ""}${live} ms` : "");
       if (this._dbg.textContent !== d) this._dbg.textContent = d;
     }
   }

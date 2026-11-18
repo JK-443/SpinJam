@@ -90,6 +90,8 @@ class ActiveSource:
     position: float | None
     playing: bool
     source_label: str | None = None
+    # Raw source media_position_updated_at (not SpinJam's publish clock).
+    position_updated_at: datetime | None = None
 
 
 def snapshot_from_state(entity_id: str, state: str, attrs: dict[str, Any]) -> SourceSnapshot:
@@ -124,6 +126,35 @@ def snapshot_from_state(entity_id: str, state: str, attrs: dict[str, Any]) -> So
     )
 
 
+def _active_from_snap(
+    snap: SourceSnapshot,
+    *,
+    kind: str,
+    sync_offset_ms: int,
+    now: datetime | None,
+) -> ActiveSource:
+    position = estimate_position(
+        media_position=snap.position,
+        media_position_updated_at=snap.position_updated_at,
+        state=snap.state,
+        sync_offset_ms=sync_offset_ms,
+        now=now,
+    )
+    return ActiveSource(
+        entity_id=snap.entity_id,
+        kind=kind,
+        artist=snap.artist,
+        title=snap.title,
+        album=snap.album,
+        art_url=snap.art_url,
+        duration=snap.duration,
+        position=position,
+        playing=snap.state == "playing",
+        source_label=snap.source,
+        position_updated_at=snap.position_updated_at,
+    )
+
+
 def select_active_source(
     snapshots: list[SourceSnapshot],
     *,
@@ -131,6 +162,7 @@ def select_active_source(
     vinyl_entity_id: str | None,
     sync_offset_ms: int = 0,
     now: datetime | None = None,
+    hold: ActiveSource | None = None,
 ) -> ActiveSource | None:
     """Pick the active now-playing source.
 
@@ -139,8 +171,35 @@ def select_active_source(
     play/pause tier, config list order wins (then recency). Paused wins only
     when nothing is playing. Sonos/Port Line-in defers to the vinyl entity
     when configured.
+
+    When ``hold`` is a still-playing source for the same track, keep it so
+    mid-track flaps between sources (e.g. speaker groups) do not retarget.
+    Hold is released when that source stops or pauses.
     """
     by_id = {snap.entity_id: snap for snap in snapshots}
+
+    if hold is not None and hold.playing:
+        held = by_id.get(hold.entity_id)
+        if (
+            held is not None
+            and held.state == "playing"
+            and held.title == hold.title
+            and held.artist == hold.artist
+            and not is_tv_placeholder_track(held.title, held.artist)
+            and not (
+                is_passthrough_source(held.source)
+                and not is_line_in_source(held.source)
+            )
+        ):
+            # Preserve vinyl/line-in kind when held.
+            kind = hold.kind
+            if is_line_in_source(held.source) and vinyl_entity_id and vinyl_entity_id in by_id:
+                held = by_id[vinyl_entity_id]
+                kind = SOURCE_KIND_VINYL
+            return _active_from_snap(
+                held, kind=kind, sync_offset_ms=sync_offset_ms, now=now
+            )
+
     # (not_playing, priority_index, -recency, snap, kind)
     candidates: list[tuple[bool, int, float, SourceSnapshot, str]] = []
 
@@ -197,22 +256,4 @@ def select_active_source(
 
     candidates.sort(key=lambda item: (item[0], item[1], item[2]))
     _paused, _prio, _rec, snap, kind = candidates[0]
-    position = estimate_position(
-        media_position=snap.position,
-        media_position_updated_at=snap.position_updated_at,
-        state=snap.state,
-        sync_offset_ms=sync_offset_ms,
-        now=now,
-    )
-    return ActiveSource(
-        entity_id=snap.entity_id,
-        kind=kind,
-        artist=snap.artist,
-        title=snap.title,
-        album=snap.album,
-        art_url=snap.art_url,
-        duration=snap.duration,
-        position=position,
-        playing=snap.state == "playing",
-        source_label=snap.source,
-    )
+    return _active_from_snap(snap, kind=kind, sync_offset_ms=sync_offset_ms, now=now)
