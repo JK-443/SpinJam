@@ -46,7 +46,9 @@
           "recast_while_playing": "Re-cast while playing (session drop recovery)",
           "recast_interval": "Re-cast interval (seconds)",
           "recast_on_startup": "Re-cast on Home Assistant restart if Cast was on",
-          "power_off_display_on_stop": "Power off display when stopping (default off; Cast quit leaves TV on)"
+          "power_off_display_on_stop": "Power off display when stopping (default off; Cast quit leaves TV on)",
+          "hd_artwork": "High-resolution album art (iTunes / Cover Art Archive)",
+          "prefetch": "Prefetch next-track art and lyrics when the queue exposes them"
         }
       }
     },
@@ -77,7 +79,7 @@
     },
     "create_dashboard": {
       "name": "Create SpinJam dashboard",
-      "description": "Create or update the storage-mode Lovelace dashboard (panel view + SpinJam card) used for Cast.",
+      "description": "Create or update the storage-mode Lovelace dashboard (TV panel + Controls tiles) used for Cast.",
       "fields": {
         "dashboard_path": {
           "name": "Dashboard path",

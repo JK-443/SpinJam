@@ -13,7 +13,9 @@ from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.spinjam.const import (
+    CONF_HD_ARTWORK,
     CONF_LYRICS_ENABLED,
+    CONF_PREFETCH,
     CONF_SOURCE_PLAYERS,
     CONF_SYNC_OFFSET_MS,
     CONF_VINYL_PLAYER,
@@ -30,6 +32,8 @@ def _entry(unique_id: str = DOMAIN, **data_overrides):
         CONF_VINYL_PLAYER: None,
         CONF_LYRICS_ENABLED: False,
         CONF_SYNC_OFFSET_MS: 0,
+        CONF_HD_ARTWORK: False,
+        CONF_PREFETCH: False,
     }
     data.update(data_overrides)
     return MockConfigEntry(
@@ -70,18 +74,33 @@ async def test_coordinator_aggregates_stream_source(hass: HomeAssistant) -> None
     mock_client = MagicMock()
     mock_client.fetch = AsyncMock(return_value=lyrics)
 
-    with patch.object(SpinJamCoordinator, "_client", return_value=mock_client):
+    mock_art = AsyncMock(
+        resolve=AsyncMock(
+            return_value=None,
+        )
+    )
+    with (
+        patch.object(SpinJamCoordinator, "_client", return_value=mock_client),
+        patch.object(SpinJamCoordinator, "_artwork_resolver", return_value=mock_art),
+        patch(
+            "custom_components.spinjam.coordinator.async_resolve_next_track",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+    ):
         coordinator = SpinJamCoordinator(hass, entry)
         await coordinator.async_set_tracking(True)
         await coordinator.async_refresh()
+        await hass.async_block_till_done()
 
-    assert coordinator.data.active is not None
-    assert coordinator.data.active.title == "Everything In Its Right Place"
-    assert coordinator.data.active.artist == "Radiohead"
-    assert coordinator.data.active.kind == "stream"
-    assert coordinator.data.lyric_current == "Everything"
-    assert coordinator.data.lyric_next == "In its right place"
-    mock_client.fetch.assert_awaited()
+        assert coordinator.data.active is not None
+        assert coordinator.data.active.title == "Everything In Its Right Place"
+        assert coordinator.data.active.artist == "Radiohead"
+        assert coordinator.data.active.kind == "stream"
+        assert coordinator.data.lyric_current == "Everything"
+        assert coordinator.data.lyric_next == "In its right place"
+        mock_client.fetch.assert_awaited()
+        await coordinator.async_shutdown()
 
 
 @pytest.mark.asyncio
@@ -112,12 +131,26 @@ async def test_coordinator_line_in_uses_vinyl(hass: HomeAssistant) -> None:
     )
     entry.add_to_hass(hass)
 
-    coordinator = SpinJamCoordinator(hass, entry)
-    await coordinator.async_set_tracking(True)
-    await coordinator.async_refresh()
-    assert coordinator.data.active is not None
-    assert coordinator.data.active.entity_id == "media_player.spinjam_turntable"
-    assert coordinator.data.active.kind == "vinyl"
+    with (
+        patch.object(
+            SpinJamCoordinator,
+            "_artwork_resolver",
+            return_value=AsyncMock(resolve=AsyncMock(return_value=None)),
+        ),
+        patch(
+            "custom_components.spinjam.coordinator.async_resolve_next_track",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+    ):
+        coordinator = SpinJamCoordinator(hass, entry)
+        await coordinator.async_set_tracking(True)
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+        assert coordinator.data.active is not None
+        assert coordinator.data.active.entity_id == "media_player.spinjam_turntable"
+        assert coordinator.data.active.kind == "vinyl"
+        await coordinator.async_shutdown()
     assert coordinator.data.active.title == "Karma Police"
 
 

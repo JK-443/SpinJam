@@ -25,13 +25,20 @@ from .cast import (
     cast_options,
 )
 from .cast_entities import cast_platform_status
+from .artwork import ArtworkResolver
 from .const import (
+    ARTWORK_DISK_CACHE_DIR,
+    ARTWORK_DISK_CACHE_FILE,
     ATTR_ALBUM_LOCK,
+    ATTR_ARTWORK_HD,
+    ATTR_ARTWORK_NEXT,
+    ATTR_ARTWORK_SOURCE,
     ATTR_DISPLAYS,
     ATTR_LYRIC_CURRENT,
     ATTR_LYRIC_LINES,
     ATTR_LYRIC_NEXT,
     ATTR_LYRIC_OFFSET_MS,
+    ATTR_LYRICS_ENABLED,
     ATTR_SELECTED_DISPLAY,
     ATTR_SYNC_OFFSET_MS,
     CAST_LAUNCH_GRACE_SEC,
@@ -39,9 +46,11 @@ from .const import (
     CONF_DASHBOARD_PATH,
     CONF_DISPLAY_ENTITY,
     CONF_DISPLAYS,
+    CONF_HD_ARTWORK,
     CONF_LYRIC_OFFSET_MS,
     CONF_LYRICS_ENABLED,
     CONF_POWER_OFF_DISPLAY_ON_STOP,
+    CONF_PREFETCH,
     CONF_RECAST_INTERVAL,
     CONF_RECAST_WHILE_PLAYING,
     CONF_SOURCE_PLAYERS,
@@ -50,9 +59,11 @@ from .const import (
     CONF_VIEW_PATH,
     CONF_VINYL_PLAYER,
     DEFAULT_BUILTIN_CASTING,
+    DEFAULT_HD_ARTWORK,
     DEFAULT_LYRIC_OFFSET_MS,
     DEFAULT_LYRICS_ENABLED,
     DEFAULT_POWER_OFF_DISPLAY_ON_STOP,
+    DEFAULT_PREFETCH,
     DEFAULT_SYNC_OFFSET_MS,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
@@ -66,12 +77,13 @@ from .const import (
 )
 from .frontend import card_file_hash
 from .lyrics import LrcLibClient, LyricsResult, line_at, lines_payload
+from .next_track import async_resolve_next_track
 from .source import ActiveSource, select_active_source, snapshot_from_state
 
 if TYPE_CHECKING:
     from .number import SpinJamLyricOffsetNumber
     from .select import SpinJamDisplaySelect
-    from .switch import SpinJamCastSwitch, SpinJamTrackingSwitch
+    from .switch import SpinJamCastSwitch, SpinJamLyricsSwitch, SpinJamTrackingSwitch
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -89,6 +101,10 @@ class SpinJamData:
     position_updated_at: datetime | None = None
     tracking_enabled: bool = False
     cast_active: bool = False
+    artwork_hd: str | None = None
+    artwork_source: str | None = None
+    artwork_next: str | None = None
+    lyrics_enabled: bool = True
 
 
 class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
@@ -113,24 +129,32 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
                 options.get(CONF_LYRIC_OFFSET_MS, DEFAULT_LYRIC_OFFSET_MS)
             ),
             tracking_enabled=False,
+            lyrics_enabled=True,
         )
         self._lyrics_client: LrcLibClient | None = None
+        self._artwork: ArtworkResolver | None = None
         self._unsub_state: Any = None
         self._tracked: list[str] = []
         self._last_lyrics_key: str | None = None
+        self._last_artwork_key: str | None = None
         self.display_select: SpinJamDisplaySelect | None = None
         self.selected_display: str | None = None
         self.cast_switch: SpinJamCastSwitch | None = None
         self.tracking_switch: SpinJamTrackingSwitch | None = None
+        self.lyrics_switch: SpinJamLyricsSwitch | None = None
         self.lyric_offset_number: SpinJamLyricOffsetNumber | None = None
         self._cast_active = False
         self._cast_display: str | None = None
         self._unsub_recast: Any = None
         self._unsub_cast_display: Any = None
         self._tracking_enabled = False
+        # Runtime lyrics UI/fetch gate (switch.spinjam_lyrics); restored on add.
+        self._lyrics_display_enabled = True
         self._ending_cast = False
         self._cast_launch_until: datetime | None = None
         self._cast_start_task: asyncio.Task[Any] | None = None
+        self._prefetch_task: asyncio.Task[Any] | None = None
+        self._prefetch_key: str | None = None
         # Last SpinJam card JS version cast to each display (Cast caches resources).
         self._cast_card_version_by_display: dict[str, str] = {}
         self._last_publish_fingerprint: tuple[Any, ...] | None = None
@@ -139,6 +163,16 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         if self._lyrics_client is None:
             self._lyrics_client = LrcLibClient(async_get_clientsession(self.hass))
         return self._lyrics_client
+
+    def _artwork_resolver(self) -> ArtworkResolver:
+        if self._artwork is None:
+            from pathlib import Path
+
+            disk = Path(self.hass.config.path(ARTWORK_DISK_CACHE_DIR, ARTWORK_DISK_CACHE_FILE))
+            self._artwork = ArtworkResolver(
+                async_get_clientsession(self.hass), disk_path=disk
+            )
+        return self._artwork
 
     def _options(self) -> dict[str, Any]:
         return {**self.entry.data, **self.entry.options}
@@ -170,8 +204,22 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         return []
 
     @property
-    def lyrics_enabled(self) -> bool:
+    def lyrics_config_enabled(self) -> bool:
+        """Config-flow option: allow LRCLIB fetching at all."""
         return bool(self._options().get(CONF_LYRICS_ENABLED, DEFAULT_LYRICS_ENABLED))
+
+    @property
+    def lyrics_enabled(self) -> bool:
+        """Runtime lyrics on (switch); card + fetch gate."""
+        return self._lyrics_display_enabled and self.lyrics_config_enabled
+
+    @property
+    def hd_artwork_enabled(self) -> bool:
+        return bool(self._options().get(CONF_HD_ARTWORK, DEFAULT_HD_ARTWORK))
+
+    @property
+    def prefetch_enabled(self) -> bool:
+        return bool(self._options().get(CONF_PREFETCH, DEFAULT_PREFETCH))
 
     @property
     def lyric_offset_ms(self) -> int:
@@ -227,11 +275,19 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
 
     async def async_shutdown(self) -> None:
         self._async_cancel_cast_start_task()
+        self._async_cancel_prefetch()
         self._async_stop_recast()
         self._async_unwatch_cast_display()
         if self._unsub_state:
             self._unsub_state()
             self._unsub_state = None
+
+    def _async_cancel_prefetch(self) -> None:
+        task = self._prefetch_task
+        self._prefetch_task = None
+        self._prefetch_key = None
+        if task is not None and not task.done():
+            task.cancel()
 
     def _async_cancel_cast_start_task(self) -> None:
         task = self._cast_start_task
@@ -289,6 +345,10 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
                 self._tracking_enabled if tracking_enabled is None else tracking_enabled
             ),
             cast_active=self._cast_active,
+            artwork_hd=None,
+            artwork_source=None,
+            artwork_next=None,
+            lyrics_enabled=self.lyrics_enabled,
         )
 
     def _data_fingerprint(self, data: SpinJamData) -> tuple[Any, ...]:
@@ -315,6 +375,10 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             data.album_lock,
             data.tracking_enabled,
             data.cast_active,
+            data.artwork_hd,
+            data.artwork_source,
+            data.artwork_next,
+            data.lyrics_enabled,
             # Only fingerprint position clock when we have a media_position.
             data.position_updated_at if active and active.position is not None else None,
             self.selected_display,
@@ -355,6 +419,9 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         lyric_current = None
         lyric_next = None
         lyric_lines = None
+        artwork_hd = self.data.artwork_hd if self.data else None
+        artwork_source = self.data.artwork_source if self.data else None
+        artwork_next = self.data.artwork_next if self.data else None
 
         if active and self.lyrics_enabled and active.artist and active.title:
             key = f"{active.artist}|{active.title}|{active.album}|{active.duration}"
@@ -386,6 +453,39 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         else:
             self._last_lyrics_key = None
 
+        if active and self.hd_artwork_enabled and (active.artist or active.title):
+            art_key = f"{active.artist}|{active.album}|{active.title}"
+            if art_key != self._last_artwork_key:
+                try:
+                    art = await self._artwork_resolver().resolve(
+                        artist=active.artist,
+                        title=active.title,
+                        album=active.album,
+                        duration=active.duration,
+                        entity_picture=active.art_url,
+                    )
+                except Exception:  # noqa: BLE001 — never block now-playing on art lookup
+                    _LOGGER.debug("HD artwork resolve failed", exc_info=True)
+                    art = None
+                self._last_artwork_key = art_key
+                if art is not None:
+                    artwork_hd = art.url
+                    artwork_source = art.source
+                else:
+                    artwork_hd = active.art_url
+                    artwork_source = "entity_picture" if active.art_url else None
+            elif not artwork_hd and active.art_url:
+                artwork_hd = active.art_url
+                artwork_source = artwork_source or "entity_picture"
+        elif not self.hd_artwork_enabled:
+            artwork_hd = active.art_url if active else None
+            artwork_source = "entity_picture" if artwork_hd else None
+            self._last_artwork_key = None
+        else:
+            artwork_hd = None
+            artwork_source = None
+            self._last_artwork_key = None
+
         # Keep select options in sync after options reload.
         if self.display_select is not None:
             self.display_select._sync_options_from_coordinator()  # noqa: SLF001
@@ -408,6 +508,12 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         else:
             position_updated_at = None
 
+        if active and self.prefetch_enabled:
+            self._schedule_prefetch(active)
+        else:
+            self._async_cancel_prefetch()
+            artwork_next = None
+
         return self._publish_data(
             SpinJamData(
                 active=active,
@@ -421,8 +527,153 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
                 position_updated_at=position_updated_at,
                 tracking_enabled=True,
                 cast_active=self._cast_active,
+                artwork_hd=artwork_hd,
+                artwork_source=artwork_source,
+                artwork_next=artwork_next,
+                lyrics_enabled=self.lyrics_enabled,
             )
         )
+
+    async def _async_prefetch_for_active(self, active: ActiveSource) -> str | None:
+        """Resolve and cache next-track assets; return next HD art URL if any."""
+        nxt = await async_resolve_next_track(self.hass, active.entity_id)
+        if nxt is None or not (nxt.artist or nxt.title):
+            return None
+        art_url = None
+        if self.hd_artwork_enabled:
+            art = await self._artwork_resolver().resolve(
+                artist=nxt.artist,
+                title=nxt.title,
+                album=nxt.album,
+                duration=nxt.duration,
+                entity_picture=nxt.art_url,
+            )
+            if art is not None:
+                art_url = art.url
+        if self.lyrics_enabled and nxt.artist and nxt.title:
+            await self._client().fetch(
+                artist=nxt.artist,
+                title=nxt.title,
+                album=nxt.album,
+                duration=nxt.duration,
+            )
+        return art_url
+
+    def _apply_artwork_next(self, art_url: str) -> None:
+        held = self.data
+        if held is None or held.artwork_next == art_url:
+            return
+        updated = SpinJamData(
+            active=held.active,
+            lyric_current=held.lyric_current,
+            lyric_next=held.lyric_next,
+            lyric_lines=held.lyric_lines,
+            lyrics=held.lyrics,
+            album_lock=held.album_lock,
+            sync_offset_ms=held.sync_offset_ms,
+            lyric_offset_ms=held.lyric_offset_ms,
+            position_updated_at=held.position_updated_at,
+            tracking_enabled=held.tracking_enabled,
+            cast_active=self._cast_active,
+            artwork_hd=held.artwork_hd,
+            artwork_source=held.artwork_source,
+            artwork_next=art_url,
+            lyrics_enabled=held.lyrics_enabled,
+        )
+        self.async_set_updated_data(updated)
+        self._last_publish_fingerprint = self._data_fingerprint(updated)
+
+    def _schedule_prefetch(self, active: ActiveSource) -> None:
+        """Background-resolve next-track HD art (+ lyrics) when the source exposes it."""
+        key = f"{active.entity_id}|{active.artist}|{active.title}"
+        # Avoid cancelling an in-flight prefetch for the same track on every poll.
+        if self._prefetch_key == key and self._prefetch_task is not None:
+            if not self._prefetch_task.done():
+                return
+            if self.data and self.data.artwork_next:
+                return
+        self._async_cancel_prefetch()
+        self._prefetch_key = key
+
+        async def _job() -> None:
+            try:
+                art_url = await self._async_prefetch_for_active(active)
+                if not art_url:
+                    return
+                if not (
+                    self.data
+                    and self.data.active
+                    and self.data.active.entity_id == active.entity_id
+                    and self.data.active.title == active.title
+                    and self.data.active.artist == active.artist
+                ):
+                    return
+                self._apply_artwork_next(art_url)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("Prefetch next-track assets failed", exc_info=True)
+            finally:
+                if self._prefetch_task is asyncio.current_task():
+                    self._prefetch_task = None
+
+        self._prefetch_task = self.hass.async_create_task(_job())
+
+    async def async_set_lyrics_enabled(self, enabled: bool) -> None:
+        """Toggle lyrics fetch/display (live; no Cast restart)."""
+        enabled = bool(enabled)
+        if self._lyrics_display_enabled == enabled:
+            return
+        self._lyrics_display_enabled = enabled
+        if self.lyrics_switch is not None and self.lyrics_switch.hass is not None:
+            self.lyrics_switch.async_write_ha_state()
+        if not enabled:
+            self._last_lyrics_key = None
+            held = self.data
+            self.async_set_updated_data(
+                SpinJamData(
+                    active=held.active,
+                    lyric_current=None,
+                    lyric_next=None,
+                    lyric_lines=None,
+                    lyrics=None,
+                    album_lock=held.album_lock,
+                    sync_offset_ms=held.sync_offset_ms,
+                    lyric_offset_ms=held.lyric_offset_ms,
+                    position_updated_at=held.position_updated_at,
+                    tracking_enabled=held.tracking_enabled,
+                    cast_active=self._cast_active,
+                    artwork_hd=held.artwork_hd,
+                    artwork_source=held.artwork_source,
+                    artwork_next=held.artwork_next,
+                    lyrics_enabled=False,
+                )
+            )
+            self._last_publish_fingerprint = self._data_fingerprint(self.data)
+        elif self._tracking_enabled:
+            await self.async_request_refresh()
+        else:
+            held = self.data
+            self.async_set_updated_data(
+                SpinJamData(
+                    active=held.active,
+                    lyric_current=held.lyric_current,
+                    lyric_next=held.lyric_next,
+                    lyric_lines=held.lyric_lines,
+                    lyrics=held.lyrics,
+                    album_lock=held.album_lock,
+                    sync_offset_ms=held.sync_offset_ms,
+                    lyric_offset_ms=held.lyric_offset_ms,
+                    position_updated_at=held.position_updated_at,
+                    tracking_enabled=held.tracking_enabled,
+                    cast_active=self._cast_active,
+                    artwork_hd=held.artwork_hd,
+                    artwork_source=held.artwork_source,
+                    artwork_next=held.artwork_next,
+                    lyrics_enabled=self.lyrics_enabled,
+                )
+            )
+            self._last_publish_fingerprint = self._data_fingerprint(self.data)
 
     async def async_set_tracking(
         self, enabled: bool, *, from_cast_stop: bool = False
@@ -469,19 +720,24 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         if self._tracking_enabled:
             await self.async_request_refresh()
         else:
+            held = self.data
             self.async_set_updated_data(
                 SpinJamData(
-                    active=self.data.active,
-                    lyric_current=self.data.lyric_current,
-                    lyric_next=self.data.lyric_next,
-                    lyric_lines=self.data.lyric_lines,
-                    lyrics=self.data.lyrics,
-                    album_lock=self.data.album_lock,
+                    active=held.active,
+                    lyric_current=held.lyric_current,
+                    lyric_next=held.lyric_next,
+                    lyric_lines=held.lyric_lines,
+                    lyrics=held.lyrics,
+                    album_lock=held.album_lock,
                     sync_offset_ms=offset_ms,
-                    lyric_offset_ms=self.data.lyric_offset_ms,
-                    position_updated_at=self.data.position_updated_at,
-                    tracking_enabled=self.data.tracking_enabled,
+                    lyric_offset_ms=held.lyric_offset_ms,
+                    position_updated_at=held.position_updated_at,
+                    tracking_enabled=held.tracking_enabled,
                     cast_active=self._cast_active,
+                    artwork_hd=held.artwork_hd,
+                    artwork_source=held.artwork_source,
+                    artwork_next=held.artwork_next,
+                    lyrics_enabled=held.lyrics_enabled,
                 )
             )
 
@@ -514,6 +770,10 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
                 position_updated_at=held.position_updated_at,
                 tracking_enabled=held.tracking_enabled,
                 cast_active=self._cast_active,
+                artwork_hd=held.artwork_hd,
+                artwork_source=held.artwork_source,
+                artwork_next=held.artwork_next,
+                lyrics_enabled=held.lyrics_enabled,
             )
         )
         self._last_publish_fingerprint = self._data_fingerprint(self.data)
@@ -823,6 +1083,10 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             ATTR_ALBUM_LOCK: self.data.album_lock,
             ATTR_DISPLAYS: list(self.displays),
             ATTR_SELECTED_DISPLAY: self.selected_display,
+            ATTR_ARTWORK_HD: self.data.artwork_hd,
+            ATTR_ARTWORK_SOURCE: self.data.artwork_source,
+            ATTR_ARTWORK_NEXT: self.data.artwork_next,
+            ATTR_LYRICS_ENABLED: self.lyrics_enabled,
             "tracking_enabled": self._tracking_enabled,
             "cast_active": self._cast_active,
             "builtin_casting": self.builtin_casting,

@@ -1,5 +1,5 @@
 /*
- * spinjam-lyrics-card v4 — centered, fading, karaoke-sweep lyrics for SpinJam TV.
+ * spinjam-lyrics-card v5 — lyrics + HD art crossfade + cover layout when lyrics off.
  * type: custom:spinjam-lyrics-card
  * entity: media_player.spinjam_now_playing   (default)
  * mode: lyrics | details                     (lyrics = centred lyrics only;
@@ -213,13 +213,67 @@ class SpinJamLyricsCard extends HTMLElement {
         .dl { font-size: calc(var(--sj-u, 10px) * 2.3); opacity: .65; margin-top: 4px; }
         .info .prog { max-width: none; margin: calc(var(--sj-u, 10px) * 2.2) 0 0; font-size: calc(var(--sj-u, 10px) * 2); opacity: .9; }
         .info .bar { height: calc(var(--sj-u, 10px) * .7); border-radius: 99px; }
+        .art-stack { position: absolute; inset: 0; }
+        .art-layer {
+          position: absolute; inset: 0; background: #000 center / cover no-repeat;
+          opacity: 0; transition: opacity 700ms ease;
+        }
+        .art-layer.show { opacity: 1; }
+        /* cover mode (lyrics off): fullscreen centred art over blurred fill */
+        .cover {
+          position: absolute; inset: 0; display: none; overflow: hidden;
+          background: #0a0a0a;
+        }
+        :host([mode="cover"]) .cover { display: block; }
+        :host([mode="cover"]) .head,
+        :host([mode="cover"]) .vp,
+        :host([mode="cover"]) .msg,
+        :host([mode="cover"]) .det { display: none !important; }
+        :host([mode="cover"]) ha-card { padding: 0; }
+        .cover-blur {
+          position: absolute; inset: -8%; background: #000 center / cover no-repeat;
+          filter: blur(42px) brightness(.45) saturate(1.1);
+          transform: scale(1.12);
+        }
+        .cover-art {
+          position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%);
+          width: min(58vmin, 520px); aspect-ratio: 1; border-radius: 10px;
+          background: #111 center / cover no-repeat;
+          box-shadow: 0 18px 50px rgba(0,0,0,.55);
+          transition: opacity 700ms ease, background-image 0s;
+        }
+        .cover-meta {
+          position: absolute; left: 0; right: 0; bottom: 0;
+          padding: 0 calc(var(--sj-u, 10px) * 4) calc(var(--sj-u, 10px) * 3.6);
+          text-align: center;
+        }
+        .cover-title {
+          font-size: calc(var(--sj-u, 10px) * 3.6); font-weight: 800; line-height: 1.15;
+        }
+        .cover-artist {
+          font-size: calc(var(--sj-u, 10px) * 2.4); font-weight: 600; opacity: .8; margin-top: 8px;
+        }
+        .cover-meta .prog {
+          max-width: min(520px, 70vw); margin: calc(var(--sj-u, 10px) * 2) auto 0;
+          font-size: calc(var(--sj-u, 10px) * 1.8); opacity: .85;
+        }
+        .cover-meta .bar { height: 4px; border-radius: 99px; }
         .hidden { display: none; }
       </style>
       <ha-card>
-        <div class="det"><div class="art"></div><div class="shade"></div>
+        <div class="det"><div class="art-stack"><div class="art-layer a0"></div><div class="art-layer a1"></div></div><div class="shade"></div>
           <div class="info"><div class="dt"></div><div class="da"></div><div class="dl"></div>
             <div class="prog dprog"><span class="tl">0:00</span><div class="bar"><div class="fillbar"></div></div><span class="tr">0:00</span></div>
           </div></div>
+        <div class="cover">
+          <div class="cover-blur"></div>
+          <div class="cover-art"></div>
+          <div class="cover-meta">
+            <div class="cover-title"></div>
+            <div class="cover-artist"></div>
+            <div class="prog cprog"><span class="tl">0:00</span><div class="bar"><div class="fillbar"></div></div><span class="tr">0:00</span></div>
+          </div>
+        </div>
         <div class="head"><div class="title"></div><div class="sub"></div>
           <div class="prog"><span class="tl">0:00</span><div class="bar"><div class="fillbar"></div></div><span class="tr">0:00</span></div>
           <div class="dbg hidden"></div></div>
@@ -232,19 +286,117 @@ class SpinJamLyricsCard extends HTMLElement {
     this._vp = this._root.querySelector(".vp");
     this._ul = this._root.querySelector("ul");
     this._card = this._root.querySelector("ha-card");
-    const details = this._cfg && this._cfg.mode === "details";
-    this.setAttribute("mode", details ? "details" : "lyrics");
-    const pr = details ? this._root.querySelector(".dprog") : this._root.querySelector(".head .prog");
-    this._prog = pr;
-    this._fillbar = pr.querySelector(".fillbar");
-    this._tl = pr.querySelector(".tl");
-    this._tr = pr.querySelector(".tr");
-    this._art = this._root.querySelector(".art");
+    this._art0 = this._root.querySelector(".a0");
+    this._art1 = this._root.querySelector(".a1");
+    this._artFront = 0;
     this._dt = this._root.querySelector(".dt");
     this._da = this._root.querySelector(".da");
     this._dl = this._root.querySelector(".dl");
     this._head = this._root.querySelector(".head");
     this._dbg = this._root.querySelector(".dbg");
+    this._coverBlur = this._root.querySelector(".cover-blur");
+    this._coverArt = this._root.querySelector(".cover-art");
+    this._coverTitle = this._root.querySelector(".cover-title");
+    this._coverArtist = this._root.querySelector(".cover-artist");
+    this._bindProgress();
+  }
+
+  _bindProgress() {
+    const a = (this._state && this._state.attributes) || {};
+    const lyricsOn = a.lyrics_enabled !== false;
+    const details = this._cfg && this._cfg.mode === "details";
+    let mode = "lyrics";
+    if (details) mode = "details";
+    else if (!lyricsOn) mode = "cover";
+    this.setAttribute("mode", mode);
+    let pr;
+    if (mode === "details") pr = this._root.querySelector(".dprog");
+    else if (mode === "cover") pr = this._root.querySelector(".cprog");
+    else pr = this._root.querySelector(".head .prog");
+    this._prog = pr;
+    this._fillbar = pr.querySelector(".fillbar");
+    this._tl = pr.querySelector(".tl");
+    this._tr = pr.querySelector(".tr");
+  }
+
+  _absUrl(pic) {
+    if (!pic) return "";
+    if (this._hass && this._hass.hassUrl) return this._hass.hassUrl(pic);
+    return pic;
+  }
+
+  _preload(url) {
+    if (!url) return;
+    const img = new Image();
+    img.decoding = "async";
+    img.src = url;
+  }
+
+  _setArtLayers(loUrl, hdUrl) {
+    const lo = this._absUrl(loUrl);
+    const hd = this._absUrl(hdUrl || "");
+    const key = `${lo}|${hd}`;
+    if (key === this._artKey) {
+      if (hd) this._preload(hd);
+      return;
+    }
+    this._artKey = key;
+    const back = this._artFront ? this._art0 : this._art1;
+    const front = this._artFront ? this._art1 : this._art0;
+    // Show low-res immediately, then crossfade HD when loaded.
+    if (lo) {
+      back.style.backgroundImage = `url("${lo.replace(/"/g, "%22")}")`;
+      back.classList.add("show");
+      front.classList.remove("show");
+      this._artFront = this._artFront ? 0 : 1;
+    }
+    const target = hd || lo;
+    if (!target) {
+      this._art0.style.backgroundImage = "none";
+      this._art1.style.backgroundImage = "none";
+      this._art0.classList.remove("show");
+      this._art1.classList.remove("show");
+      return;
+    }
+    if (!hd || hd === lo) {
+      const layer = this._artFront ? this._art1 : this._art0;
+      layer.style.backgroundImage = `url("${target.replace(/"/g, "%22")}")`;
+      layer.classList.add("show");
+      return;
+    }
+    const img = new Image();
+    img.onload = () => {
+      if (this._artKey !== key) return;
+      const next = this._artFront ? this._art0 : this._art1;
+      const cur = this._artFront ? this._art1 : this._art0;
+      next.style.backgroundImage = `url("${hd.replace(/"/g, "%22")}")`;
+      next.classList.add("show");
+      cur.classList.remove("show");
+      this._artFront = this._artFront ? 0 : 1;
+    };
+    img.onerror = () => { /* keep low-res */ };
+    img.src = hd;
+  }
+
+  _setCoverArt(loUrl, hdUrl) {
+    const lo = this._absUrl(loUrl);
+    const hd = this._absUrl(hdUrl || "");
+    const apply = (url) => {
+      if (!url) {
+        this._coverArt.style.backgroundImage = "none";
+        this._coverBlur.style.backgroundImage = "none";
+        return;
+      }
+      const safe = `url("${url.replace(/"/g, "%22")}")`;
+      this._coverArt.style.backgroundImage = safe;
+      this._coverBlur.style.backgroundImage = safe;
+    };
+    apply(lo);
+    if (hd && hd !== lo) {
+      const img = new Image();
+      img.onload = () => apply(hd);
+      img.src = hd;
+    }
   }
 
   /* ---------- data ---------- */
@@ -334,41 +486,49 @@ class SpinJamLyricsCard extends HTMLElement {
     const st = this._state;
     const a = (st && st.attributes) || {};
     const active = st && (st.state === "playing" || st.state === "paused");
+    const lyricsOn = a.lyrics_enabled !== false;
+    this._bindProgress();
     this._titleEl.textContent = active ? a.media_title || "" : "SpinJam";
     this._subEl.textContent = active
       ? [a.media_artist, a.media_album_name].filter(Boolean).join(" · ")
       : "";
 
+    const lo = active ? (a.entity_picture || "") : "";
+    const hd = active ? (a.artwork_hd || "") : "";
+    if (a.artwork_next) this._preload(this._absUrl(a.artwork_next));
+
     const raw = Array.isArray(a.lyric_lines) ? a.lyric_lines.filter((l) => l && l.text != null) : [];
     const key = active
-      ? [a.media_title, a.media_artist, raw.length, raw[0] && raw[0].t, raw[0] && raw[0].text].join("|")
+      ? [a.media_title, a.media_artist, raw.length, raw[0] && raw[0].t, raw[0] && raw[0].text, lyricsOn].join("|")
       : "idle";
     if (key !== this._songKey) {
       this._songKey = key;
-      this._lines = raw.map((r) => Object.assign(this._parseLine(r), { raw: String(r.text) }));
+      this._lines = lyricsOn
+        ? raw.map((r) => Object.assign(this._parseLine(r), { raw: String(r.text) }))
+        : [];
       this._renderList();
       this._idx = -2;
     }
 
     const details = this._cfg.mode === "details";
+    const cover = !details && !lyricsOn;
     if (details) {
       this._dt.textContent = active ? a.media_title || "" : "SpinJam";
       this._da.textContent = active ? a.media_artist || "" : "Waiting for music…";
       this._dl.textContent = active ? a.media_album_name || "" : "";
-      const pic = active && a.entity_picture ? a.entity_picture : "";
-      if (pic !== this._pic) {
-        this._pic = pic;
-        const url = pic && this._hass && this._hass.hassUrl ? this._hass.hassUrl(pic) : pic;
-        this._art.style.backgroundImage = url ? `url("${url.replace(/"/g, "%22")}")` : "none";
-      }
+      this._setArtLayers(lo, hd);
+    } else if (cover) {
+      this._coverTitle.textContent = active ? a.media_title || "" : "SpinJam";
+      this._coverArtist.textContent = active ? a.media_artist || "Waiting for music…" : "Waiting for music…";
+      this._setCoverArt(lo, hd);
     } else {
       this._head.classList.toggle("hidden", !(this._cfg.show_header || this._cfg.show_progress));
       this._titleEl.classList.toggle("hidden", !this._cfg.show_header);
       this._subEl.classList.toggle("hidden", !this._cfg.show_header);
     }
-    const wantProg = details || this._cfg.show_progress;
+    const wantProg = details || cover || this._cfg.show_progress;
     this._prog.classList.toggle("hidden", !(wantProg && active && Number(a.media_duration) > 0));
-    if (details) { this._progress(); return; }
+    if (details || cover) { this._progress(); return; }
     this._dbg.classList.toggle("hidden", !this._cfg.debug);
     this._progress();
     if (!active || !this._lines.length) {
@@ -517,7 +677,8 @@ class SpinJamLyricsCard extends HTMLElement {
     const st = this._state;
     if (st && st.state === "playing" && this.isConnected) {
       this._progress();
-      if (this._lines.length && this._cfg.mode !== "details") this._tick(false);
+      const mode = this.getAttribute("mode");
+      if (this._lines.length && mode !== "details" && mode !== "cover") this._tick(false);
     }
     this._startLoop();
   }
@@ -534,7 +695,7 @@ if (!customElements.get("spinjam-lyrics-card")) {
   window.customCards.push({
     type: "spinjam-lyrics-card",
     name: "SpinJam Lyrics",
-    description: "Centered, fading, karaoke-sweep lyrics for SpinJam (modes: lyrics | details)",
+    description: "Centered lyrics, HD art, and cover layout when lyrics are off (modes: lyrics | details | cover)",
   });
 }
 

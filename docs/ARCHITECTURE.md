@@ -6,7 +6,7 @@ SpinJam is a **general now-playing system**. Vinyl is one source among Music Ass
 
 | Piece | Runs where | Role |
 | --- | --- | --- |
-| `custom_components/spinjam` | Home Assistant (HACS) | Brain: pick active source, unify metadata, LRCLIB lyrics, services, Cast |
+| `custom_components/spinjam` | Home Assistant (HACS) | Brain: pick active source, unify metadata, LRCLIB lyrics, HD art, services, Cast |
 | `spinjam/` Python service | Capture Pi (Zero 2 W / Pi 4) | Vinyl audio capture + Shazam/(optional ACR/AudD) → MQTT media_player |
 | Lovelace card + Cast | HA → TV Cast targets | `spinjam-lyrics-card` (details + lyrics) + `cast.show_lovelace_view` on `spinjam.start` |
 
@@ -28,9 +28,12 @@ SpinJam is a **general now-playing system**. Vinyl is one source among Music Ass
 6. Cast receivers cache Lovelace resources once per session. SpinJam tracks the card JS hash last cast per display; when it changes, quit before re-cast. Display watcher ignores flaps for ~20 s around launches; session ends on `unavailable` or when `app_name` leaves the HA Lovelace app (not on brief `off`).
 7. `spinjam.stop` / Cast switch off ends Cast via `media_player.turn_off` (app quit; TV usually stays on) when built-in casting is on; optional power-off uses `remote.turn_off`. Always fires `spinjam_stop`.
 8. `switch.spinjam_tracking` (default on): off clears now-playing and, if Cast is active, also stops Cast. Tracking on does not start Cast.
-9. `number.spinjam_lyric_offset` / `sync_offset_ms` update live without config-entry reload; the TV card defaults `offset_entity` to the number entity.
-10. Legacy single `display_entity` config is migrated into a one-item `displays` list when present.
-11. Prefer `spinjam.create_dashboard` (panel: details left, lyrics right). Card JS is a Lovelace module resource at `/spinjam/spinjam-lyrics-card.js?v=<hash>` (plus the same URL via `add_extra_js_url`); `spinjam-now-playing-card` remains a deprecated alias.
+9. `switch.spinjam_lyrics` (default on, RestoreEntity): off stops LRCLIB fetches and switches the TV card live to a full-screen cover-art layout (no Cast restart). State is exposed as `lyrics_enabled` on `media_player.spinjam_now_playing`.
+10. `number.spinjam_lyric_offset` / `sync_offset_ms` update live without config-entry reload; the TV card defaults `offset_entity` to the number entity.
+11. Legacy single `display_entity` config is migrated into a one-item `displays` list when present.
+12. Prefer `spinjam.create_dashboard` (panel: details left, lyrics right; plus a Controls view with cast/tracking/lyrics tiles). Card JS is a Lovelace module resource at `/spinjam/spinjam-lyrics-card.js?v=<hash>` (plus the same URL via `add_extra_js_url`); `spinjam-now-playing-card` remains a deprecated alias.
+13. HD album art (option `hd_artwork`, default on): on track change, SpinJam queries the iTunes Search API and rewrites `artworkUrl100` to a large size, falls back to MusicBrainz + Cover Art Archive (`front-1200`), then `entity_picture`. Results are scored and cached (memory + small on-disk LRU). Exposed as `artwork_hd` / `artwork_source`; the card crossfades from low-res once HD loads.
+14. Prefetch (option `prefetch`, default on): when the active source exposes a next item (queue attributes or Music Assistant `get_queue`), SpinJam preloads next-track HD art and lyrics; the card preloads `artwork_next`. Degrades gracefully if MA is absent.
 
 ## Memory constraints
 
@@ -38,6 +41,6 @@ HA runs on a Pi 4 that is (or was) memory-starved. The integration must stay lig
 
 - No Shazam/ACR on the HA host
 - `aiohttp` via Home Assistant’s shared session only
-- Small in-memory LRU for lyrics (and art URLs are passed through, not downloaded)
+- Small in-memory LRU for lyrics and artwork URLs (URLs only — images are not downloaded on the HA host); optional tiny on-disk artwork URL cache under the config dir
 - Event-driven updates + a low-frequency lyric tick while playing
 - Vanilla JS TV card (no Lit); `lyric_lines` capped (~120) and windowed around the current position; optional per-line `words` from LRCLIB enhanced tags
