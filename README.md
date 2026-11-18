@@ -63,6 +63,7 @@ Copy `custom_components/spinjam` into your HA `config/custom_components/spinjam`
 | --- | --- |
 | `switch.spinjam_cast` | **Master on/off.** On = wake + cast + tracking on (`spinjam.start`); off = quit Cast, tracking off, clear now-playing (`spinjam.stop`). |
 | `switch.spinjam_tracking` | On (default) follows sources / polls; off clears now-playing and also stops Cast if active. Tracking on does not start Cast. |
+| `switch.spinjam_lyrics` | On (default) fetches/shows lyrics; off switches the TV card to a cover-art layout (live, no Cast restart). |
 
 Options: **Built-in casting** (default on) — when off, start/stop and the Cast switch only fire `spinjam_start` / `spinjam_stop` so you can cast from your own automations without double-casting. **Recast on startup** (default off) — only then will a previously-on Cast switch re-cast after an HA restart.
 
@@ -72,8 +73,8 @@ Options: **Built-in casting** (default on) — when off, start/stop and the Cast
 2. Open Developer Tools → States → `media_player.spinjam_now_playing`.  
 3. Confirm artist/title/album/art; with lyrics enabled, check `lyric_current` / `lyric_next` / `lyric_lines`.  
 4. Services: `spinjam.identify`, `spinjam.set_sync_offset`, `spinjam.select_album`, `spinjam.clear_lock`, `spinjam.start`, `spinjam.stop`.
-5. Entities: `select.spinjam_display`, `switch.spinjam_cast`, `switch.spinjam_tracking`, `number.spinjam_lyric_offset`.
-6. Attributes include `displays`, `selected_display`, `lyric_offset_ms`, `lyric_lines` (optional `words`), `tracking_enabled`, `cast_active`.
+5. Entities: `select.spinjam_display`, `switch.spinjam_cast`, `switch.spinjam_tracking`, `switch.spinjam_lyrics`, `number.spinjam_lyric_offset`.
+6. Attributes include `displays`, `selected_display`, `lyric_offset_ms`, `lyric_lines` (optional `words`), `tracking_enabled`, `cast_active`, `artwork_hd`, `artwork_source`, `artwork_next`, `lyrics_enabled`.
 
 ## Vinyl capture node (optional source)
 

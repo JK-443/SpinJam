@@ -11,7 +11,9 @@ from custom_components.spinjam.const import (
     ATTR_SELECTED_DISPLAY,
     CONF_DISPLAY_ENTITY,
     CONF_DISPLAYS,
+    CONF_HD_ARTWORK,
     CONF_LYRICS_ENABLED,
+    CONF_PREFETCH,
     CONF_RECAST_WHILE_PLAYING,
     CONF_SOURCE_PLAYERS,
     CONF_SYNC_OFFSET_MS,
@@ -38,6 +40,8 @@ def _entry(**overrides):
             "media_player.example_tv_2",
         ],
         CONF_LYRICS_ENABLED: False,
+        CONF_HD_ARTWORK: False,
+        CONF_PREFETCH: False,
         CONF_SYNC_OFFSET_MS: 0,
         CONF_RECAST_WHILE_PLAYING: False,
     }

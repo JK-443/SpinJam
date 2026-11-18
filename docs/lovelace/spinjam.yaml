@@ -27,6 +27,25 @@ views:
             entity: media_player.spinjam_now_playing
             mode: lyrics
             offset_entity: number.spinjam_lyric_offset
+  - title: Controls
+    path: controls
+    type: masonry
+    cards:
+      - type: tile
+        entity: switch.spinjam_cast
+        name: SpinJam
+      - type: tile
+        entity: switch.spinjam_tracking
+        name: Tracking
+      - type: tile
+        entity: switch.spinjam_lyrics
+        name: Lyrics
+      - type: tile
+        entity: select.spinjam_display
+        name: Display
+      - type: tile
+        entity: number.spinjam_lyric_offset
+        name: Lyric offset
   # Optional phone/desktop header (not cast to the TV panel above):
   # - title: About
   #   path: about

@@ -16,9 +16,11 @@ from .const import (
     CONF_BUILTIN_CASTING,
     CONF_DASHBOARD_PATH,
     CONF_DISPLAYS,
+    CONF_HD_ARTWORK,
     CONF_LYRIC_OFFSET_MS,
     CONF_LYRICS_ENABLED,
     CONF_POWER_OFF_DISPLAY_ON_STOP,
+    CONF_PREFETCH,
     CONF_RECAST_INTERVAL,
     CONF_RECAST_ON_STARTUP,
     CONF_RECAST_WHILE_PLAYING,
@@ -28,10 +30,12 @@ from .const import (
     CONF_VINYL_PLAYER,
     DEFAULT_BUILTIN_CASTING,
     DEFAULT_DASHBOARD_PATH,
+    DEFAULT_HD_ARTWORK,
     DEFAULT_LYRIC_OFFSET_MS,
     DEFAULT_LYRICS_ENABLED,
     DEFAULT_NAME,
     DEFAULT_POWER_OFF_DISPLAY_ON_STOP,
+    DEFAULT_PREFETCH,
     DEFAULT_RECAST_INTERVAL,
     DEFAULT_RECAST_ON_STARTUP,
     DEFAULT_RECAST_WHILE_PLAYING,
@@ -205,6 +209,14 @@ def _schema(defaults: dict[str, Any] | None = None, *, options: bool = False) ->
             default=defaults.get(
                 CONF_POWER_OFF_DISPLAY_ON_STOP, DEFAULT_POWER_OFF_DISPLAY_ON_STOP
             ),
+        )] = _boolean_selector()
+        fields[vol.Required(
+            CONF_HD_ARTWORK,
+            default=defaults.get(CONF_HD_ARTWORK, DEFAULT_HD_ARTWORK),
+        )] = _boolean_selector()
+        fields[vol.Required(
+            CONF_PREFETCH,
+            default=defaults.get(CONF_PREFETCH, DEFAULT_PREFETCH),
         )] = _boolean_selector()
     return vol.Schema(fields)
 

@@ -98,7 +98,19 @@ Settings → Devices & services → SpinJam → Configure:
 | `select.spinjam_display` | Which configured display to use |
 | `switch.spinjam_cast` (**master on/off**) | On → wake display if needed, cast Lovelace, enable tracking (`spinjam.start`). Off → quit Cast app, disable tracking, clear now-playing to idle (`spinjam.stop`). Preferred daily toggle. |
 | `switch.spinjam_tracking` | Off pauses polling and clears now-playing; if Cast is active it also stops Cast. On resumes tracking only (does **not** start Cast). Restored across restarts; defaults to on. |
+| `switch.spinjam_lyrics` | Off stops lyric fetches and switches the TV card live to a full-screen cover-art layout (blurred fill + centred art + slim progress). On restores lyrics. Restored; default on. No Cast restart. |
 | `number.spinjam_lyric_offset` | Lyric display offset in ms (**positive = lyrics later**). Live — no reload. Restored. Range −5000…5000, step 50. The TV card reads this by default via `offset_entity`. |
+
+### Now-playing attributes (art + lyrics)
+
+| Attribute | Meaning |
+| --- | --- |
+| `artwork_hd` | High-res cover URL (iTunes / Cover Art Archive / player picture) |
+| `artwork_source` | `itunes`, `coverartarchive`, or `entity_picture` |
+| `artwork_next` | Prefetched next-track HD URL when the queue exposes a next item |
+| `lyrics_enabled` | Mirrors `switch.spinjam_lyrics` (and config lyrics option) for the card |
+
+Options **High-resolution album art** and **Prefetch** (defaults on) can disable those features.
 
 ## Usage
 

@@ -10,8 +10,10 @@ import pytest
 from custom_components.spinjam.const import (
     CONF_DASHBOARD_PATH,
     CONF_DISPLAYS,
+    CONF_HD_ARTWORK,
     CONF_LYRIC_OFFSET_MS,
     CONF_LYRICS_ENABLED,
+    CONF_PREFETCH,
     CONF_RECAST_WHILE_PLAYING,
     CONF_SOURCE_PLAYERS,
     CONF_SYNC_OFFSET_MS,
@@ -42,6 +44,8 @@ def _entry(**overrides):
         CONF_SYNC_OFFSET_MS: 0,
         CONF_LYRIC_OFFSET_MS: 0,
         CONF_RECAST_WHILE_PLAYING: False,
+        CONF_HD_ARTWORK: False,
+        CONF_PREFETCH: False,
     }
     data.update(overrides)
     return MockConfigEntry(
