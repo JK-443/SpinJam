@@ -220,7 +220,8 @@ async def test_cast_quits_when_card_version_changes(hass: HomeAssistant) -> None
 
     with (
         patch(
-            "custom_components.spinjam.coordinator.card_file_hash",
+            "custom_components.spinjam.coordinator.async_get_card_file_hash",
+            new_callable=AsyncMock,
             return_value="newhash",
         ),
         patch(
@@ -256,7 +257,8 @@ async def test_cast_quits_when_card_version_changes(hass: HomeAssistant) -> None
     # Same version again → no quit
     with (
         patch(
-            "custom_components.spinjam.coordinator.card_file_hash",
+            "custom_components.spinjam.coordinator.async_get_card_file_hash",
+            new_callable=AsyncMock,
             return_value="newhash",
         ),
         patch(
@@ -334,3 +336,29 @@ async def test_options_schema_includes_cast_fields() -> None:
     with _pytest.raises(vol.Invalid):
         validate_dashboard_url_path("spinjam")
     assert validate_dashboard_url_path("spinjam-tv") == "spinjam-tv"
+
+
+@pytest.mark.asyncio
+async def test_show_lovelace_retries_closed_transport(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    from custom_components.spinjam.cast import async_show_now_playing
+
+    calls = {"n": 0}
+
+    async def _handler(_call) -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("Cannot write to closing transport")
+
+    hass.services.async_register("cast", "show_lovelace_view", _handler)
+    with caplog.at_level("DEBUG"):
+        ok = await async_show_now_playing(
+            hass,
+            entity_id="media_player.example_tv",
+            dashboard_path="spinjam-tv",
+            view_path="now",
+        )
+    assert ok is True
+    assert calls["n"] == 2
+    assert any("retrying once" in rec.message for rec in caplog.records)

@@ -145,6 +145,25 @@ export function formatLyricDelay(offsetMs) {
   return `${formatLyricDelaySeconds(offset)} (${word})`;
 }
 
+/** Horizontal padding on each side of the cast lyrics pane, as a fraction of its width. */
+export const CAST_LYRIC_PAD_RATIO = 0.04;
+
+/** Current-line emphasis. The layout box must stay inside the pane after this scale. */
+export const LYRIC_EMPHASIS_SCALE = 1.16;
+
+/**
+ * Layout width for the current lyric line.
+ * ``innerWidth`` is the pane width minus the horizontal padding. Dividing by
+ * the emphasis scale keeps the scaled line, including the karaoke sweep,
+ * inside that padded box.
+ */
+export function castLyricLineMaxPx(innerWidth, emphasis = LYRIC_EMPHASIS_SCALE) {
+  const inner = Number(innerWidth) || 0;
+  if (inner <= 0) return 0;
+  const scale = emphasis > 1 ? emphasis : 1;
+  return inner / scale;
+}
+
 /** "Lyrics +250 ms later, now +2.25 s" */
 export function lyricDelayToast(previousMs, nextMs) {
   const delta = Number(nextMs) - Number(previousMs);

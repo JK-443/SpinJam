@@ -96,6 +96,41 @@ def test_memory_and_disk_cache(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_disk_cache_load_and_flush_stay_off_the_loop(
+    hass: HomeAssistant, tmp_path: Path
+) -> None:
+    path = tmp_path / "artwork_cache.json"
+    path.write_text(
+        json.dumps(
+            {
+                "items": [
+                    {
+                        "key": "a|b",
+                        "url": "https://example.invalid/a.jpg",
+                        "source": "itunes",
+                        "score": 0.9,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    disk = ArtworkDiskCache(path)
+    disk.bind(hass)
+    assert disk.get("a|b") is Ellipsis
+    assert path.read_text(encoding="utf-8")
+    await hass.async_add_executor_job(disk.load)
+    hit = disk.get("a|b")
+    assert isinstance(hit, ArtworkResult)
+    disk.set("c|d", ArtworkResult(url="https://example.invalid/c.jpg", source="itunes"))
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    assert all(item.get("key") != "c|d" for item in raw["items"])
+    await disk.async_flush()
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    assert any(item.get("key") == "c|d" for item in raw["items"])
+
+
+@pytest.mark.asyncio
 async def test_resolver_itunes_then_fallback_entity_picture() -> None:
     session = MagicMock()
 

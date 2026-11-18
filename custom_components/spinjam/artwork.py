@@ -26,8 +26,12 @@ ARTWORK_CACHE_SIZE = 64
 HTTP_TIMEOUT = ClientTimeout(total=6, connect=3, sock_read=5)
 MUSICBRAINZ_MIN_INTERVAL = 1.05  # respect ~1 req/s
 MUSICBRAINZ_USER_AGENT = (
-    "SpinJam/0.7.1 (https://github.com/JK-443/SpinJam; home-assistant-integration)"
+    "SpinJam/0.7.2 (https://github.com/JK-443/SpinJam; home-assistant-integration)"
 )
+
+# Disk writes are coalesced so a burst of resolves does not touch the filesystem
+# on the event loop. Flushed on unload.
+_DISK_SAVE_DELAY_SEC = 10.0
 
 _SIZE_RE = re.compile(r"\d+x\d+bb", re.IGNORECASE)
 _NORMALIZE_RE = re.compile(r"[^a-z0-9]+")
@@ -114,8 +118,20 @@ class ArtworkDiskCache:
         self._maxsize = maxsize
         self._data: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._loaded = False
+        self._hass: Any = None
+        self._dirty = False
+        self._unsub_save: Any = None
+
+    def bind(self, hass: Any) -> None:
+        """Remember Home Assistant so loads and saves stay off the event loop."""
+        self._hass = hass
+
+    @property
+    def loaded(self) -> bool:
+        return self._loaded
 
     def load(self) -> None:
+        """Read the cache file. Call from an executor, not the event loop."""
         if self._loaded:
             return
         self._loaded = True
@@ -144,7 +160,13 @@ class ArtworkDiskCache:
             _LOGGER.debug("Artwork disk cache load failed: %s", err)
 
     def get(self, key: str) -> ArtworkResult | None | object:
-        self.load()
+        if not self._loaded:
+            # Unit tests have no hass and load on first use. A bound cache must
+            # already have been loaded via the executor during setup.
+            if self._hass is None:
+                self.load()
+            else:
+                return Ellipsis
         if key not in self._data:
             return Ellipsis
         self._data.move_to_end(key)
@@ -158,7 +180,8 @@ class ArtworkDiskCache:
         )
 
     def set(self, key: str, value: ArtworkResult | None) -> None:
-        self.load()
+        if not self._loaded and self._hass is None:
+            self.load()
         if value is None:
             self._data[key] = {"url": None, "source": "miss", "score": 0}
         else:
@@ -170,7 +193,41 @@ class ArtworkDiskCache:
         self._data.move_to_end(key)
         while len(self._data) > self._maxsize:
             self._data.popitem(last=False)
-        self._save()
+        if self._hass is None:
+            self._save()
+            return
+        self._dirty = True
+        self._schedule_save()
+
+    def _schedule_save(self) -> None:
+        if self._unsub_save is not None or self._hass is None:
+            return
+        from homeassistant.helpers.event import async_call_later
+
+        def _fire(_now: Any) -> None:
+            self._unsub_save = None
+            self._hass.async_create_task(self.async_flush())
+
+        self._unsub_save = async_call_later(self._hass, _DISK_SAVE_DELAY_SEC, _fire)
+
+    async def async_flush(self) -> None:
+        """Write a pending cache update. Safe to call on unload."""
+        unsub = self._unsub_save
+        self._unsub_save = None
+        if unsub is not None:
+            unsub()
+        if not self._dirty:
+            return
+        self._dirty = False
+        if self._hass is None:
+            self._save()
+            return
+        try:
+            await self._hass.async_add_executor_job(self._save)
+        except Exception:  # noqa: BLE001 — never fail unload on a cache write
+            _LOGGER.debug("Artwork disk cache flush failed", exc_info=True)
+        if self._dirty:
+            self._schedule_save()
 
     def _save(self) -> None:
         try:
@@ -223,6 +280,19 @@ class ArtworkResolver:
         )
         self._mb_lock = asyncio.Lock()
         self._mb_last = 0.0
+
+    async def async_load(self, hass: Any) -> None:
+        """Load the disk cache in an executor before the first resolve."""
+        if self.disk is None:
+            return
+        self.disk.bind(hass)
+        if not self.disk.loaded:
+            await hass.async_add_executor_job(self.disk.load)
+
+    async def async_flush(self) -> None:
+        """Write any debounced disk update."""
+        if self.disk is not None:
+            await self.disk.async_flush()
 
     async def resolve(
         self,

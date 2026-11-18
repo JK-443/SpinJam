@@ -271,11 +271,12 @@ async def test_cast_start_returns_before_wake_completes(hass: HomeAssistant) -> 
         ),
     ):
         target = await coordinator.async_start()
-        # Returned while wake still blocked.
+        # Returned before the blocked wake finished. The task reaches wake
+        # on the next loop turn, so turn_on itself does not wait for it.
         assert target == "media_player.example_tv"
         assert coordinator.cast_active is True
-        assert started.is_set()
         assert coordinator._cast_start_task is not None  # noqa: SLF001
+        await asyncio.wait_for(started.wait(), timeout=1)
         release.set()
         await hass.async_block_till_done()
 

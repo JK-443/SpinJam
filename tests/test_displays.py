@@ -26,9 +26,11 @@ from custom_components.spinjam.coordinator import SpinJamCoordinator
 pytest.importorskip("pytest_homeassistant_custom_component")
 
 from homeassistant.const import CONF_NAME
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, State
 from homeassistant.exceptions import ServiceValidationError
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from homeassistant.helpers import area_registry as ar
+from homeassistant.helpers import entity_registry as er
+from pytest_homeassistant_custom_component.common import MockConfigEntry, mock_restore_cache
 
 
 def _entry(**overrides):
@@ -181,14 +183,72 @@ async def test_media_player_exposes_display_attributes(hass: HomeAssistant) -> N
 
     select_state = hass.states.get("select.spinjam_display")
     assert select_state is not None
-    assert select_state.state == "media_player.example_tv"
+    assert select_state.state == "Example Tv"
+    assert select_state.attributes.get("display_entity_id") == "media_player.example_tv"
     assert set(select_state.attributes.get("options", [])) == {
-        "media_player.example_tv",
-        "media_player.example_tv_2",
+        "Example Tv",
+        "Example Tv 2",
     }
 
     assert hass.services.has_service(DOMAIN, "start")
     assert hass.services.has_service(DOMAIN, "stop")
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    await hass.async_stop()
+
+
+@pytest.mark.asyncio
+async def test_display_select_shows_names_and_keeps_entity_id(
+    hass: HomeAssistant,
+) -> None:
+    areas = ar.async_get(hass)
+    lounge = areas.async_create("Lounge")
+    den = areas.async_create("Den")
+    registry = er.async_get(hass)
+    lounge_entry = registry.async_get_or_create(
+        "media_player",
+        "cast",
+        "screen_a",
+        suggested_object_id="screen_a",
+    )
+    den_entry = registry.async_get_or_create(
+        "media_player",
+        "cast",
+        "screen_b",
+        suggested_object_id="screen_b",
+    )
+    lounge_entry = registry.async_update_entity(lounge_entry.entity_id, area_id=lounge.id)
+    den_entry = registry.async_update_entity(den_entry.entity_id, area_id=den.id)
+    hass.states.async_set(lounge_entry.entity_id, "off", {"friendly_name": "Screen"})
+    hass.states.async_set(den_entry.entity_id, "off", {"friendly_name": "Screen"})
+    mock_restore_cache(
+        hass,
+        [State("select.spinjam_display", den_entry.entity_id)],
+    )
+    entry = _entry(
+        unique_id=f"{DOMAIN}_display_names",
+        **{CONF_DISPLAYS: [lounge_entry.entity_id, den_entry.entity_id]},
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    state = hass.states.get("select.spinjam_display")
+    assert state is not None
+    assert state.state == "Screen (Den)"
+    assert state.attributes.get("display_entity_id") == den_entry.entity_id
+    assert set(state.attributes.get("options", [])) == {"Screen (Lounge)", "Screen (Den)"}
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    assert coordinator.selected_display == den_entry.entity_id
+
+    await coordinator.display_select.async_select_option(lounge_entry.entity_id)
+    await hass.async_block_till_done()
+    state = hass.states.get("select.spinjam_display")
+    assert state is not None
+    assert state.state == "Screen (Lounge)"
+    assert state.attributes.get("display_entity_id") == lounge_entry.entity_id
+    assert coordinator.selected_display == lounge_entry.entity_id
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()

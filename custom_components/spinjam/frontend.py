@@ -65,21 +65,25 @@ def _resource_path(url: str) -> str:
     return urlsplit(url).path
 
 
-def lovelace_resources(hass: HomeAssistant) -> Any | None:
-    """Return the Lovelace resources collection for current or legacy HA.
+def lovelace_value(hass: HomeAssistant, name: str) -> Any:
+    """Read one Lovelace attribute from ``LovelaceData`` or a legacy dict.
 
-    Newer HA stores ``hass.data['lovelace']`` as a ``LovelaceData``-like object
-    with a ``.resources`` attribute. Older builds used a plain dict.
+    Current Home Assistant stores ``hass.data['lovelace']`` as an object.
+    Older builds used a plain dict. ``getattr`` covers the object; the dict
+    form is the fallback.
     """
     lovelace = hass.data.get("lovelace")
     if lovelace is None:
         return None
-    resources = getattr(lovelace, "resources", None)
-    if resources is not None:
-        return resources
-    if isinstance(lovelace, dict):
-        return lovelace.get("resources")
-    return None
+    value = getattr(lovelace, name, None)
+    if value is None and isinstance(lovelace, dict):
+        value = lovelace.get(name)
+    return value
+
+
+def lovelace_resources(hass: HomeAssistant) -> Any | None:
+    """Return the Lovelace resources collection for current or legacy HA."""
+    return lovelace_value(hass, "resources")
 
 
 async def async_register_lovelace_resource(hass: HomeAssistant, url: str) -> bool:

@@ -62,7 +62,7 @@ Copy `custom_components/spinjam` into your HA `config/custom_components/spinjam`
 | Entity | Role |
 | --- | --- |
 | `switch.spinjam_cast` | **On/off.** On = wake + cast + tracking (`spinjam.start`); off = quit Cast, tracking off, clear now-playing (`spinjam.stop`). Tracking is derived from Cast. The old `switch.spinjam_tracking` entity is removed on upgrade. |
-| `select.spinjam_display` | Which configured Cast display to use. |
+| `select.spinjam_display` | Which configured Cast display to use. Options are friendly names (area or entity id if two share a name). The stored selection stays the media_player entity id. |
 | `select.spinjam_source` | **Source.** `Automatic` (default) ranks configured players (playing over paused, sticky within a track). Any other option follows only that player, including the vinyl player when one is configured. Restored across restarts. |
 | `switch.spinjam_lyrics` | On (default) fetches/shows the two-panel lyrics layout. Off switches live to one full-width stage (blurred cover, centred art, title, artist, album, slim progress) and sets `lyrics_status` to `disabled`. No Cast restart. |
 

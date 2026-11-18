@@ -232,6 +232,25 @@ def test_source_choices_automatic_friendly_names_and_vinyl() -> None:
     assert choices[3].entity_id == "media_player.turntable"
 
 
+def test_display_choices_use_names_then_area_then_entity_id() -> None:
+    from custom_components.spinjam.source import build_display_choices
+
+    choices = build_display_choices(
+        [
+            ("media_player.example_tv", "Living Room", "Lounge"),
+            ("media_player.example_tv_2", "Living Room", "Den"),
+            ("media_player.example_tv_3", "Living Room", "Den"),
+            ("media_player.speaker_a", None, None),
+        ]
+    )
+    assert [(choice.label, choice.entity_id) for choice in choices] == [
+        ("Living Room (Lounge)", "media_player.example_tv"),
+        ("Living Room (Den)", "media_player.example_tv_2"),
+        ("Living Room (media_player.example_tv_3)", "media_player.example_tv_3"),
+        ("Speaker A", "media_player.speaker_a"),
+    ]
+
+
 def test_fixed_source_ignores_other_players() -> None:
     snaps = [
         SourceSnapshot(
