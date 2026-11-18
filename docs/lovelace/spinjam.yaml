@@ -46,3 +46,10 @@ views:
       - type: tile
         entity: number.spinjam_lyric_offset
         name: Lyric offset
+  # Optional phone/desktop header (not cast to the TV panel above):
+  # - title: About
+  #   path: about
+  #   cards:
+  #     - type: markdown
+  #       content: |
+  #         ![SpinJam](/spinjam/spinjam-icon.png)
