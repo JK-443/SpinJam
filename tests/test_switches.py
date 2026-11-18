@@ -373,10 +373,10 @@ async def test_no_recast_on_startup_by_default(hass: HomeAssistant) -> None:
     cast_state = hass.states.get("switch.spinjam_cast")
     assert cast_state is not None
     assert cast_state.state == STATE_OFF
-    tracking = hass.states.get("switch.spinjam_tracking")
-    assert tracking is not None
-    # After restart Cast is off → tracking must start off (not restore ON).
-    assert tracking.state == STATE_OFF
+    # Tracking is derived from Cast and is no longer its own switch.
+    assert hass.states.get("switch.spinjam_tracking") is None
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    assert coordinator.tracking_enabled is False
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     await hass.async_stop()
@@ -416,7 +416,9 @@ async def test_options_schema_includes_builtin_casting() -> None:
 
 
 def test_cast_switch_is_restore_entity() -> None:
-    from custom_components.spinjam.switch import SpinJamCastSwitch, SpinJamTrackingSwitch
+    from custom_components.spinjam import switch as switch_mod
+    from custom_components.spinjam.switch import SpinJamCastSwitch, SpinJamLyricsSwitch
 
     assert issubclass(SpinJamCastSwitch, RestoreEntity)
-    assert issubclass(SpinJamTrackingSwitch, RestoreEntity)
+    assert issubclass(SpinJamLyricsSwitch, RestoreEntity)
+    assert not hasattr(switch_mod, "SpinJamTrackingSwitch")

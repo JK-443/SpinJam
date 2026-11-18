@@ -33,6 +33,21 @@ export function clamp(value, lo, hi) {
 }
 
 /**
+ * Where to read the lyric file.
+ * Positive offsetMs delays the lyrics (look earlier in the LRC). Applied once;
+ * the clock position already includes delivery delay and must not be shifted again.
+ * @param {number} mediaPosition seconds from PlaybackClock.position
+ * @param {number} offsetMs
+ */
+export function lyricLookPosition(mediaPosition, offsetMs) {
+  const off = Number(offsetMs);
+  const delay = Number.isFinite(off) ? off / 1000 : 0;
+  const pos = Number(mediaPosition);
+  if (!Number.isFinite(pos)) return 0;
+  return pos - delay;
+}
+
+/**
  * Server position at HA write time, plus delivery delay above the observed baseline.
  * @param {{
  *   mediaPosition: number,

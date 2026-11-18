@@ -33,19 +33,42 @@ views:
     cards:
       - type: tile
         entity: switch.spinjam_cast
-        name: SpinJam
-      - type: tile
-        entity: switch.spinjam_tracking
-        name: Tracking
-      - type: tile
-        entity: switch.spinjam_lyrics
-        name: Lyrics
+        name: Cast
+        icon: mdi:cast
       - type: tile
         entity: select.spinjam_display
         name: Display
+        icon: mdi:television
+      - type: tile
+        entity: select.spinjam_source
+        name: Source
+        icon: mdi:speaker-multiple
+      - type: tile
+        entity: switch.spinjam_lyrics
+        name: Lyrics
+        icon: mdi:microphone-variant
       - type: tile
         entity: number.spinjam_lyric_offset
-        name: Lyric offset
+        name: Lyric delay
+        icon: mdi:timer-outline
+      - type: horizontal-stack
+        cards:
+          - type: button
+            entity: button.spinjam_lyrics_earlier
+            name: Lyrics earlier
+            icon: mdi:chevron-double-up
+            show_name: true
+            show_icon: true
+          - type: tile
+            entity: sensor.spinjam_lyric_delay
+            name: Lyric delay
+            icon: mdi:timer-outline
+          - type: button
+            entity: button.spinjam_lyrics_later
+            name: Lyrics later
+            icon: mdi:chevron-double-down
+            show_name: true
+            show_icon: true
   # Optional phone/desktop header (not cast to the TV panel above):
   # - title: About
   #   path: about

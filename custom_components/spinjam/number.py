@@ -35,13 +35,14 @@ class SpinJamLyricOffsetNumber(
 ):
     """Live lyric display offset in milliseconds (positive = lyrics later)."""
 
-    _attr_has_entity_name = False
-    _attr_name = "SpinJam Lyric Offset"
+    _attr_has_entity_name = True
+    _attr_translation_key = "lyric_offset"
+    _attr_name = "Lyric delay"
     _attr_icon = "mdi:tune-vertical"
     _attr_native_unit_of_measurement = "ms"
     _attr_native_min_value = -5000
     _attr_native_max_value = 5000
-    _attr_native_step = 50
+    _attr_native_step = 100
     _attr_mode = NumberMode.BOX
     _attr_entity_category = EntityCategory.CONFIG
 

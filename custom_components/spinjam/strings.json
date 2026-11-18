@@ -40,7 +40,9 @@
           "lyrics_enabled": "Fetch LRCLIB synced lyrics",
           "fallback_providers": "Fallback lyrics providers",
           "sync_offset_ms": "Playback sync offset (ms)",
-          "lyric_offset_ms": "Lyric display offset (ms; positive = lyrics later)",
+          "lyric_offset_ms": "Lyric delay (ms; higher = lyrics later)",
+          "lyric_nudge_ms": "Lyric delay step (ms)",
+          "scale_lyrics": "Scale lyric timestamps when the edit length is slightly off",
           "builtin_casting": "Built-in casting (cast.show_lovelace_view)",
           "dashboard_path": "Cast dashboard path (must include a hyphen)",
           "view_path": "Cast view path",
@@ -52,7 +54,11 @@
           "prefetch": "Prefetch next-track art and lyrics when the queue exposes them"
         },
         "data_description": {
-          "fallback_providers": "Tried in order after LRCLIB misses. QQ Music is an unofficial endpoint, for personal use. lyrics.ovh returns unsynced text."
+          "fallback_providers": "Tried in order after LRCLIB misses. QQ Music is an unofficial endpoint, for personal use. lyrics.ovh returns unsynced text.",
+          "lyric_offset_ms": "Higher = lyrics appear later. Lower/negative = lyrics appear earlier.",
+          "sync_offset_ms": "Added to the playhead. Lyric delay is separate: higher means lyrics appear later.",
+          "lyric_nudge_ms": "How far the Lyrics earlier and Lyrics later buttons move the delay.",
+          "scale_lyrics": "Off by default. When on, synced timestamps stretch to the player length if the edit is off by 3–30 seconds."
         }
       }
     },
@@ -63,13 +69,14 @@
       "invalid_view_path": "View path is required.",
       "invalid_sync_offset": "Playback sync offset must be between -2000 and 2000 ms.",
       "invalid_lyric_offset": "Lyric display offset must be between -5000 and 5000 ms.",
+      "invalid_lyric_nudge": "Lyric delay step must be between 50 and 2000 ms.",
       "invalid_recast_interval": "Re-cast interval must be between 15 and 300 seconds."
     }
   },
   "services": {
     "start": {
       "name": "Start SpinJam display",
-      "description": "Start a SpinJam display session (optional built-in Cast) and fire spinjam_start. Same as turning on switch.spinjam_cast.",
+      "description": "Start source tracking and a SpinJam display session (optional built-in Cast) and fire spinjam_start. Same as turning on switch.spinjam_cast. Tracking follows Cast.",
       "fields": {
         "display": {
           "name": "Display",
@@ -79,11 +86,11 @@
     },
     "stop": {
       "name": "Stop SpinJam display",
-      "description": "End the SpinJam display session and fire spinjam_stop. Same as turning off switch.spinjam_cast."
+      "description": "Stop source tracking, end the SpinJam display session, and fire spinjam_stop. Same as turning off switch.spinjam_cast."
     },
     "create_dashboard": {
       "name": "Create SpinJam dashboard",
-      "description": "Create or update the storage-mode Lovelace dashboard (TV panel + Controls tiles) used for Cast.",
+      "description": "Create the Lovelace dashboard or upgrade it in place: add Cast, Display, Source, and Lyrics tiles and remove the retired tracking tile without duplicating cards or editing cards you added.",
       "fields": {
         "dashboard_path": {
           "name": "Dashboard path",
@@ -93,6 +100,51 @@
           "name": "View path",
           "description": "View path inside the dashboard. Defaults to now."
         }
+      }
+    }
+  },
+  "entity": {
+    "switch": {
+      "cast": {
+        "name": "Cast"
+      },
+      "lyrics": {
+        "name": "Lyrics"
+      }
+    },
+    "select": {
+      "display": {
+        "name": "Display"
+      },
+      "source": {
+        "name": "Source"
+      }
+    },
+    "media_player": {
+      "now_playing": {
+        "name": "Now Playing"
+      }
+    },
+    "number": {
+      "lyric_offset": {
+        "name": "Lyric delay",
+        "description": "Higher = lyrics appear later. Lower/negative = lyrics appear earlier."
+      }
+    },
+    "button": {
+      "lyrics_earlier": {
+        "name": "Lyrics earlier"
+      },
+      "lyrics_later": {
+        "name": "Lyrics later"
+      },
+      "reset_lyric_delay": {
+        "name": "Reset lyric delay"
+      }
+    },
+    "sensor": {
+      "lyric_delay": {
+        "name": "Current delay"
       }
     }
   }

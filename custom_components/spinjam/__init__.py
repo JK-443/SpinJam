@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["media_player", "select", "switch", "number"]
+PLATFORMS = ["media_player", "select", "switch", "number", "button", "sensor"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -40,6 +40,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await async_setup_frontend(hass)
 
+    from .switch import async_remove_legacy_tracking_switch
+
+    async_remove_legacy_tracking_switch(hass)
+
     coordinator = SpinJamCoordinator(hass, entry)
     await coordinator.async_setup()
 
@@ -49,11 +53,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     domain_data[f"{entry.entry_id}_options"] = dict(entry.options)
     await hass.config_entries.async_forward_entry_setups(
         entry,
-        [Platform.MEDIA_PLAYER, Platform.SELECT, Platform.SWITCH, Platform.NUMBER],
+        [
+            Platform.MEDIA_PLAYER,
+            Platform.SELECT,
+            Platform.SWITCH,
+            Platform.NUMBER,
+            Platform.BUTTON,
+            Platform.SENSOR,
+        ],
     )
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     _async_register_services(hass)
+    try:
+        from .dashboard import async_upgrade_configured_dashboard
+
+        await async_upgrade_configured_dashboard(hass, entry)
+    except Exception:  # noqa: BLE001 — dashboard upgrade must not block setup
+        _LOGGER.debug("SpinJam controls dashboard was not upgraded", exc_info=True)
     return True
 
 
@@ -100,6 +117,14 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         hass.config_entries.async_update_entry(entry, data=data, options=options, version=2)
         _LOGGER.info("Migrated SpinJam config entry to version 2")
+        version = 2
+
+    if version < 3:
+        from .switch import async_remove_legacy_tracking_switch
+
+        async_remove_legacy_tracking_switch(hass)
+        hass.config_entries.async_update_entry(entry, version=3)
+        _LOGGER.info("Migrated SpinJam config entry to version 3")
 
     return True
 

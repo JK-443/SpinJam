@@ -37,8 +37,11 @@ service: spinjam.create_dashboard
 
 This creates a storage-mode **panel** dashboard with a horizontal stack:
 **details** (art / title / artist / album / progress) on the left and **lyrics**
-(centred, fading, karaoke sweep) on the right. Safe to run again (updates the
-view config in place).
+(centred, fading, karaoke sweep) on the right, plus a Controls view (Cast,
+Display, Source, Lyrics). Running it again upgrades that dashboard in place:
+missing control tiles are added, the old tracking tile is removed, and cards
+you added are not rewritten or duplicated. Setup does the same upgrade when
+the dashboard already exists.
 
 **Manual UI:**
 
@@ -93,13 +96,18 @@ Settings → Devices & services → SpinJam → Configure:
 
 ## Entities
 
+Device page order: **Cast**, **Display**, **Source**, **Lyrics**, **Now Playing**. Under Configuration: **Lyric offset**.
+
 | Entity | Behaviour |
 | --- | --- |
-| `select.spinjam_display` | Which configured display to use |
-| `switch.spinjam_cast` (**master on/off**) | On → wake display if needed, cast Lovelace, enable tracking (`spinjam.start`). Off → quit Cast app, disable tracking, clear now-playing to idle (`spinjam.stop`). Preferred daily toggle. |
-| `switch.spinjam_tracking` | Off pauses polling and clears now-playing; if Cast is active it also stops Cast. On resumes tracking only (does **not** start Cast). Restored across restarts; defaults to on. |
-| `switch.spinjam_lyrics` | Off stops lyric fetches and switches the TV card live to a full-screen cover-art layout (blurred fill + centred art + slim progress). On restores lyrics. Restored; default on. No Cast restart. |
-| `number.spinjam_lyric_offset` | Lyric display offset in ms (**positive = lyrics later**). Live — no reload. Restored. Range −5000…5000, step 50. The TV card reads this by default via `offset_entity`. |
+| `switch.spinjam_cast` | On → wake display if needed, cast Lovelace, enable tracking (`spinjam.start`). Off → quit Cast app, disable tracking, clear now-playing to idle (`spinjam.stop`). Tracking follows this switch. |
+| `select.spinjam_display` | Which configured display to use. |
+| `select.spinjam_source` | `Automatic` (default) or one configured player by friendly name, plus the vinyl player when configured. A fixed choice is the only now-playing source. Restored across restarts. Options refresh when sources change. |
+| `switch.spinjam_lyrics` | Off stops lyric fetches and switches the TV card live to one full-width stage. On restores the two-panel lyrics layout. Restored; default on. No Cast restart. |
+| `number.spinjam_lyric_offset` | **Lyric delay** in ms (**higher = lyrics appear later**). Configuration entity. Live — no reload. Restored. Range −5000…5000, step 100. |
+| `button.spinjam_lyrics_earlier` / `button.spinjam_lyrics_later` | Move the delay by the configured step (default 250 ms). Clamped to the number range. Live. |
+| `button.spinjam_reset_lyric_delay` | Restore the delay from the last options load. |
+| `sensor.spinjam_lyric_delay` | Signed readout such as `+2.0 s (later)`. |
 
 ### Now-playing attributes (art + lyrics)
 
@@ -109,8 +117,12 @@ Settings → Devices & services → SpinJam → Configure:
 | `artwork_source` | `itunes`, `coverartarchive`, or `entity_picture` |
 | `artwork_next` | Prefetched next-track HD URL when the queue exposes a next item |
 | `lyrics_enabled` | Mirrors `switch.spinjam_lyrics` (and config lyrics option) for the card |
-| `lyrics_status` | `synced`, `plain`, `instrumental`, `not_found`, `error`, or `disabled` (cover layout) |
+| `selected_source` | `Automatic`, or the entity id chosen on `select.spinjam_source` |
+| `active_source` | Entity id actually providing now-playing, or null when idle |
+| `lyrics_status` | `synced`, `plain`, `instrumental`, `not_found`, `error`, or `disabled` (full-width stage) |
 | `lyrics_source` | `lrclib`, `qqmusic`, or `lyricsovh` when a provider returned lyrics |
+| `lyrics_duration` | Length of the chosen lyrics (provider duration, or the last stamp when the file ends early) |
+| `lyrics_duration_delta` | `lyrics_duration` minus the player duration. Negative means the lyrics run short |
 
 Options **High-resolution album art** and **Prefetch** (defaults on) can disable those features. **Fallback lyrics providers** (default lyrics.ovh) run after LRCLIB. QQ Music is an unofficial endpoint, for personal use, and stays off until selected.
 
@@ -139,7 +151,7 @@ service: spinjam.stop
 alias: SpinJam cast on vinyl Line-in
 trigger:
   - platform: state
-    entity_id: media_player.living_room_port
+    entity_id: media_player.speaker_a
     attribute: source
     to: "Line-in"
 action:
@@ -155,7 +167,7 @@ Stop when leaving Line-in (optional):
 alias: SpinJam stop when Line-in ends
 trigger:
   - platform: state
-    entity_id: media_player.living_room_port
+    entity_id: media_player.speaker_a
     attribute: source
     from: "Line-in"
 action:
@@ -186,13 +198,11 @@ Tune with a known track until the highlighted line matches what you hear.
 
 ## What the card shows
 
-Official card: `custom:spinjam-lyrics-card`
+Official card: `custom:spinjam-lyrics-card`. On a 16:9 Cast dashboard the Now view is a horizontal stack: details on the left, lyrics on the right. Toggling `switch.spinjam_lyrics` swaps that for a single full-width stage with a short fade. The Cast session is not restarted.
 
-| Mode | Content |
-| --- | --- |
-| `details` | Large album art, title, artist, album, progress over a gradient |
-| `lyrics` | Centred karaoke-sweep lyrics, or static centred text when `lyrics_status` is `plain`. A dim footer reads `Lyrics: LRCLIB`, `Lyrics: QQ Music`, or `Lyrics: lyrics.ovh`. `not_found` shows "Lyrics not available for this song"; `instrumental` shows "Instrumental". |
-| `cover` | Used when `switch.spinjam_lyrics` is off (`lyrics_status` `disabled`): full-screen art, no lyric sweep |
+**Lyrics on (two panels).** Left: album art full-bleed, title, artist, and album over a bottom gradient, with a progress bar. Right: centred karaoke-sweep lyrics, or static centred text when `lyrics_status` is `plain`. A dim footer reads `Lyrics: LRCLIB`, `Lyrics: QQ Music`, or `Lyrics: lyrics.ovh`. `not_found` shows "Lyrics not available for this song"; `instrumental` shows "Instrumental".
+
+**Lyrics off (one stage, 16:9).** The lyrics panel collapses and the details card fills the screen. The background is the cover, scaled up, heavily blurred, and slightly darkened. A large square cover sits in the centre (about 60% of the screen height, rounded corners, soft shadow). Under it: the title (largest), the artist, the album in smaller dim type, then a slim progress bar with elapsed and total times. HD art still crossfades in over the low-res picture, and the next cover is preloaded. With no artwork, the background is a neutral grey gradient and the square is a placeholder. The progress clock does not step backward within a track.
 
 Timing uses a **shared clock**: `media_position + (last_updated − media_position_updated_at)`, then advanced with `performance.now()` — the TV’s `Date.now()` is never compared to HA.
 

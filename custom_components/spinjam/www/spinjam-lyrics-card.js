@@ -1,10 +1,14 @@
 /*
- * spinjam-lyrics-card v5 — lyrics + HD art crossfade + cover layout when lyrics off.
+ * spinjam-lyrics-card v6 — lyrics + HD art crossfade.
  * type: custom:spinjam-lyrics-card
  * entity: media_player.spinjam_now_playing   (default)
  * mode: lyrics | details                     (lyrics = centred lyrics only;
  *                                               details = art, title/artist/album, progress)
  * show_header / show_progress: false          (lyrics mode extras, off by default)
+ *
+ * When switch.spinjam_lyrics is off, the Cast row collapses to ONE full-width
+ * stage (blurred cover, centred square, title / artist / album, slim progress).
+ * The switch is live: presentation only, no recast.
  *
  * offset_entity: number.spinjam_lyric_offset  (default; configurable)
  *
@@ -18,7 +22,14 @@
  * Plain lyrics (lyrics_status=plain) are static centred text with no sweep.
  * A dim "Lyrics: …" footer sits at the bottom right in lyrics mode.
  */
-import { PlaybackClock } from "./spinjam-playback-clock.js";
+import { PlaybackClock, lyricLookPosition } from "./spinjam-playback-clock.js";
+import {
+  resolveCardPresentation,
+  stageArtSizePx,
+  stageMissingArt,
+  LAYOUT_TRANSITION_MS,
+  lyricDelayToast,
+} from "./spinjam-card-layout.js";
 
 const SJ_WORD_TAG = /<(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?>/g;
 
@@ -68,6 +79,7 @@ class SpinJamLyricsCard extends HTMLElement {
     const os = hass && this._cfg && this._cfg.offset_entity ? hass.states[this._cfg.offset_entity] : undefined;
     const liveChanged = os !== this._offsetState;
     this._offsetState = os;
+    this._noteOffsetToast();
     if (st === this._state) {
       if (liveChanged) this._tick(true); // offset nudged: re-sync immediately
       return;
@@ -123,6 +135,7 @@ class SpinJamLyricsCard extends HTMLElement {
       if (this._card) this._ro.observe(this._card);
     }
     this._startLoop();
+    if (this._presentation) this._applyStackSlot(this._presentation);
     requestAnimationFrame(() => { this._fitHeight(); this._scroll(false); });
     setTimeout(this._onResize, 1200); // fonts / art settle
   }
@@ -152,6 +165,8 @@ class SpinJamLyricsCard extends HTMLElement {
     const u = Math.min(r.height, r.width * 1.1) / 100;
     this.style.setProperty("--sj-fs", fs + "px");
     this.style.setProperty("--sj-u", u.toFixed(2) + "px");
+    const art = stageArtSizePx(r.height, r.width, window.innerHeight);
+    if (art) this.style.setProperty("--sj-art", art + "px");
     this._fitRows();
     this._scroll(false);
   }
@@ -222,9 +237,12 @@ class SpinJamLyricsCard extends HTMLElement {
           font-size: 12px; line-height: 1.2; opacity: .38; letter-spacing: .02em;
           pointer-events: none;
         }
-        /* details mode */
-        .det { position: absolute; inset: 0; display: none; }
-        :host([mode="details"]) .det { display: block; }
+        /* details mode — stays mounted so it can crossfade into the stage */
+        .det {
+          position: absolute; inset: 0; display: block;
+          opacity: 0; visibility: hidden; pointer-events: none;
+        }
+        :host([mode="details"]) .det { opacity: 1; visibility: visible; pointer-events: auto; }
         :host([mode="details"]) .head, :host([mode="details"]) .vp, :host([mode="details"]) .msg, :host([mode="details"]) .attrib { display: none !important; }
         :host([mode="details"]) ha-card { padding: 0; }
         .art { position: absolute; inset: 0; background: #000 center / cover no-repeat; }
@@ -242,46 +260,91 @@ class SpinJamLyricsCard extends HTMLElement {
           opacity: 0; transition: opacity 700ms ease;
         }
         .art-layer.show { opacity: 1; }
-        /* cover mode (lyrics off): fullscreen centred art over blurred fill */
-        .cover {
-          position: absolute; inset: 0; display: none; overflow: hidden;
-          background: #0a0a0a;
+        /* stage (lyrics off): one full-bleed 16:9 view, not a second panel */
+        .det, .stage {
+          transition: opacity ${LAYOUT_TRANSITION_MS}ms ease, visibility ${LAYOUT_TRANSITION_MS}ms ease;
         }
-        :host([mode="cover"]) .cover { display: block; }
-        :host([mode="cover"]) .head,
-        :host([mode="cover"]) .vp,
-        :host([mode="cover"]) .msg,
-        :host([mode="cover"]) .attrib,
-        :host([mode="cover"]) .det { display: none !important; }
-        :host([mode="cover"]) ha-card { padding: 0; }
-        .cover-blur {
-          position: absolute; inset: -8%; background: #000 center / cover no-repeat;
-          filter: blur(42px) brightness(.45) saturate(1.1);
-          transform: scale(1.12);
+        :host { transition: opacity ${LAYOUT_TRANSITION_MS}ms ease; }
+        .stage {
+          position: absolute; inset: 0; display: block; overflow: hidden;
+          background: #16161a;
+          opacity: 0; visibility: hidden; pointer-events: none;
         }
-        .cover-art {
-          position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%);
-          width: min(58vmin, 520px); aspect-ratio: 1; border-radius: 10px;
-          background: #111 center / cover no-repeat;
-          box-shadow: 0 18px 50px rgba(0,0,0,.55);
-          transition: opacity 700ms ease, background-image 0s;
+        :host([mode="stage"]) .stage { opacity: 1; visibility: visible; pointer-events: auto; }
+        :host([mode="stage"]) .head,
+        :host([mode="stage"]) .vp,
+        :host([mode="stage"]) .msg,
+        :host([mode="stage"]) .attrib { display: none !important; }
+        :host([mode="stage"]) ha-card { padding: 0; background: transparent; }
+        :host([mode="hidden"]) { opacity: 0; pointer-events: none; }
+        :host([mode="hidden"]) ha-card { visibility: hidden; }
+        .stage-bg { position: absolute; inset: 0; overflow: hidden; background: #16161a; }
+        .stage-bg.empty {
+          background: linear-gradient(165deg, #3a3a42 0%, #24242a 46%, #141418 100%);
         }
-        .cover-meta {
-          position: absolute; left: 0; right: 0; bottom: 0;
-          padding: 0 calc(var(--sj-u, 10px) * 4) calc(var(--sj-u, 10px) * 3.6);
-          text-align: center;
+        .stage-blur {
+          position: absolute; inset: -14%;
+          background: #1a1a1e center / cover no-repeat;
+          filter: blur(46px) brightness(.48) saturate(1.12);
+          transform: scale(1.2);
+          opacity: 0;
+          transition: opacity 700ms ease;
         }
-        .cover-title {
-          font-size: calc(var(--sj-u, 10px) * 3.6); font-weight: 800; line-height: 1.15;
+        .stage-blur.show { opacity: 1; }
+        .stage-bg.empty .stage-blur { opacity: 0; }
+        .stage-dim { position: absolute; inset: 0; background: rgba(0,0,0,.28); }
+        .stage-bg.empty .stage-dim { background: transparent; }
+        .stage-col {
+          position: relative; z-index: 1; height: 100%; box-sizing: border-box;
+          display: flex; flex-direction: column; align-items: center; justify-content: center;
+          padding: 3.2vh 6vw 4vh; gap: 0.35vh;
         }
-        .cover-artist {
-          font-size: calc(var(--sj-u, 10px) * 2.4); font-weight: 600; opacity: .8; margin-top: 8px;
+        .stage-art-wrap {
+          position: relative; flex: 0 0 auto;
+          width: var(--sj-art, 60vh); height: var(--sj-art, 60vh);
+          max-width: 70vw;
+          border-radius: 18px; overflow: hidden;
+          background: linear-gradient(160deg, #4a4a52, #2a2a30 55%, #1a1a1e);
+          box-shadow: 0 28px 70px rgba(0,0,0,.42), 0 2px 10px rgba(0,0,0,.28);
         }
-        .cover-meta .prog {
-          max-width: min(520px, 70vw); margin: calc(var(--sj-u, 10px) * 2) auto 0;
-          font-size: calc(var(--sj-u, 10px) * 1.8); opacity: .85;
+        .stage-art {
+          position: absolute; inset: 0; background: center / cover no-repeat;
+          opacity: 0; transition: opacity 700ms ease;
         }
-        .cover-meta .bar { height: 4px; border-radius: 99px; }
+        .stage-art.show { opacity: 1; }
+        .stage-placeholder {
+          position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+          font-size: calc(var(--sj-art, 240px) * .34); line-height: 1; opacity: .42;
+          color: #fff;
+        }
+        .stage-art-wrap.has-art .stage-placeholder { display: none; }
+        .stage-title {
+          margin-top: 2.4vh; max-width: 78vw; text-align: center;
+          font-size: clamp(28px, 4.2vh, 68px); font-weight: 800; line-height: 1.12;
+        }
+        .stage-artist {
+          max-width: 74vw; text-align: center;
+          font-size: clamp(18px, 2.6vh, 40px); font-weight: 600; opacity: .9; line-height: 1.25;
+        }
+        .stage-album {
+          max-width: 70vw; text-align: center;
+          font-size: clamp(14px, 1.9vh, 28px); font-weight: 500; opacity: .5; line-height: 1.3;
+        }
+        .stage-col .prog {
+          width: min(560px, 48vw); margin: 1.8vh auto 0;
+          font-size: clamp(13px, 1.7vh, 22px); opacity: .88;
+        }
+        .stage-col .bar { height: 4px; border-radius: 99px; }
+        .toast {
+          position: absolute; left: 50%; bottom: 7%; transform: translateX(-50%);
+          z-index: 6; max-width: 80%;
+          padding: 10px 18px; border-radius: 999px;
+          background: rgba(0,0,0,.72); color: #fff;
+          font-size: clamp(14px, 2vh, 22px); font-weight: 600; text-align: center;
+          opacity: 0; pointer-events: none;
+          transition: opacity 220ms ease;
+        }
+        .toast.show { opacity: 1; }
         .hidden { display: none; }
       </style>
       <ha-card>
@@ -289,13 +352,22 @@ class SpinJamLyricsCard extends HTMLElement {
           <div class="info"><div class="dt"></div><div class="da"></div><div class="dl"></div>
             <div class="prog dprog"><span class="tl">0:00</span><div class="bar"><div class="fillbar"></div></div><span class="tr">0:00</span></div>
           </div></div>
-        <div class="cover">
-          <div class="cover-blur"></div>
-          <div class="cover-art"></div>
-          <div class="cover-meta">
-            <div class="cover-title"></div>
-            <div class="cover-artist"></div>
-            <div class="prog cprog"><span class="tl">0:00</span><div class="bar"><div class="fillbar"></div></div><span class="tr">0:00</span></div>
+        <div class="stage">
+          <div class="stage-bg">
+            <div class="stage-blur sb0"></div>
+            <div class="stage-blur sb1"></div>
+            <div class="stage-dim"></div>
+          </div>
+          <div class="stage-col">
+            <div class="stage-art-wrap">
+              <div class="stage-art sa0"></div>
+              <div class="stage-art sa1"></div>
+              <div class="stage-placeholder" aria-hidden="true">♪</div>
+            </div>
+            <div class="stage-title"></div>
+            <div class="stage-artist"></div>
+            <div class="stage-album"></div>
+            <div class="prog sprog"><span class="tl">0:00</span><div class="bar"><div class="fillbar"></div></div><span class="tr">0:00</span></div>
           </div>
         </div>
         <div class="head"><div class="title"></div><div class="sub"></div>
@@ -304,6 +376,7 @@ class SpinJamLyricsCard extends HTMLElement {
         <div class="msg hidden"></div>
         <div class="vp"><ul></ul></div>
         <div class="attrib"></div>
+        <div class="toast" role="status"></div>
       </ha-card>`;
     this._titleEl = this._root.querySelector(".title");
     this._subEl = this._root.querySelector(".sub");
@@ -320,29 +393,131 @@ class SpinJamLyricsCard extends HTMLElement {
     this._dl = this._root.querySelector(".dl");
     this._head = this._root.querySelector(".head");
     this._dbg = this._root.querySelector(".dbg");
-    this._coverBlur = this._root.querySelector(".cover-blur");
-    this._coverArt = this._root.querySelector(".cover-art");
-    this._coverTitle = this._root.querySelector(".cover-title");
-    this._coverArtist = this._root.querySelector(".cover-artist");
+    this._stageBg = this._root.querySelector(".stage-bg");
+    this._stageArtWrap = this._root.querySelector(".stage-art-wrap");
+    this._sb0 = this._root.querySelector(".sb0");
+    this._sb1 = this._root.querySelector(".sb1");
+    this._sa0 = this._root.querySelector(".sa0");
+    this._sa1 = this._root.querySelector(".sa1");
+    this._stageFront = 0;
+    this._stageKey = null;
+    this._stageTitle = this._root.querySelector(".stage-title");
+    this._stageArtist = this._root.querySelector(".stage-artist");
+    this._stageAlbum = this._root.querySelector(".stage-album");
+    this._toast = this._root.querySelector(".toast");
+    this._toastTimer = null;
+    this._offsetMs = null;
+    this._presentation = resolveCardPresentation({
+      configuredMode: this._cfg && this._cfg.mode,
+      lyricsEnabled: true,
+      siblingShowsStage: false,
+    });
     this._bindProgress();
   }
 
   _bindProgress() {
     const a = (this._state && this._state.attributes) || {};
-    const lyricsOn = a.lyrics_enabled !== false;
-    const details = this._cfg && this._cfg.mode === "details";
-    let mode = "lyrics";
-    if (details) mode = "details";
-    else if (!lyricsOn) mode = "cover";
-    this.setAttribute("mode", mode);
+    const presentation = resolveCardPresentation({
+      configuredMode: this._cfg && this._cfg.mode,
+      lyricsEnabled: a.lyrics_enabled,
+      siblingShowsStage: this._siblingShowsStage(),
+    });
+    const prev = this.getAttribute("mode");
+    this._presentation = presentation;
+    this.setAttribute("mode", presentation.mode);
+    this._applyStackSlot(presentation);
+    if (prev && prev !== presentation.mode) {
+      requestAnimationFrame(() => this._onResize());
+    }
+    const mode = presentation.mode;
     let pr;
     if (mode === "details") pr = this._root.querySelector(".dprog");
-    else if (mode === "cover") pr = this._root.querySelector(".cprog");
+    else if (mode === "stage" || mode === "hidden") pr = this._root.querySelector(".sprog");
     else pr = this._root.querySelector(".head .prog");
     this._prog = pr;
-    this._fillbar = pr.querySelector(".fillbar");
-    this._tl = pr.querySelector(".tl");
-    this._tr = pr.querySelector(".tr");
+    this._fillbar = pr ? pr.querySelector(".fillbar") : null;
+    this._tl = pr ? pr.querySelector(".tl") : null;
+    this._tr = pr ? pr.querySelector(".tr") : null;
+  }
+
+  /* Flex child of a horizontal stack (#root), if this card is in one. */
+  _stackSlot() {
+    let node = this;
+    let fallback = null;
+    for (let i = 0; i < 8 && node && node.parentElement; i += 1) {
+      const parent = node.parentElement;
+      let flex = false;
+      try {
+        flex = getComputedStyle(parent).display === "flex";
+      } catch (err) {
+        flex = false;
+      }
+      if (flex && fallback === null) fallback = node;
+      if (flex && (parent.id === "root" || (parent.classList && parent.classList.contains("horizontal")))) {
+        return node;
+      }
+      node = parent;
+    }
+    return fallback;
+  }
+
+  _applyStackSlot(presentation) {
+    const slot = this._stackSlot();
+    if (!slot || !presentation) return;
+    if (!slot.dataset.sjSlot) {
+      slot.dataset.sjSlot = "1";
+      slot.style.transition = `flex-basis ${LAYOUT_TRANSITION_MS}ms ease, max-width ${LAYOUT_TRANSITION_MS}ms ease, opacity ${LAYOUT_TRANSITION_MS}ms ease, padding ${LAYOUT_TRANSITION_MS}ms ease`;
+      slot.style.minWidth = "0";
+    }
+    if (presentation.collapseSlot) {
+      slot.style.flex = "0 1 0px";
+      slot.style.maxWidth = "0px";
+      slot.style.padding = "0px";
+      slot.style.margin = "0px";
+      slot.style.opacity = "0";
+      slot.style.overflow = "hidden";
+      return;
+    }
+    slot.style.margin = "";
+    slot.style.overflow = "";
+    if (presentation.expandSlot) {
+      slot.style.flex = "1 1 auto";
+      slot.style.maxWidth = "100%";
+      slot.style.opacity = "1";
+      slot.style.padding = "";
+      return;
+    }
+    slot.style.flex = "";
+    slot.style.maxWidth = "";
+    slot.style.opacity = "";
+    slot.style.padding = "";
+  }
+
+  _siblingShowsStage() {
+    if (!this._cfg || this._cfg.mode === "details") return false;
+    const slot = this._stackSlot();
+    if (!slot || !slot.parentElement) return false;
+    for (const child of slot.parentElement.children) {
+      if (child === slot) continue;
+      const card = this._spinjamCardIn(child);
+      if (!card || card === this) continue;
+      const tag = (card.tagName || "").toLowerCase();
+      if (tag === "spinjam-now-playing-card") return true;
+      // Configured mode, not the live attribute: a details card's attribute
+      // becomes "stage" while lyrics are off, and it still owns the stage.
+      if (card._cfg && card._cfg.mode === "details") return true;
+    }
+    return false;
+  }
+
+  _spinjamCardIn(node) {
+    if (!node || node === this) return null;
+    const tag = (node.tagName || "").toLowerCase();
+    if (tag === "spinjam-lyrics-card" || tag === "spinjam-now-playing-card") return node;
+    if (node.querySelector) {
+      return node.querySelector("spinjam-lyrics-card, spinjam-now-playing-card");
+    }
+    return null;
   }
 
   _absUrl(pic) {
@@ -404,25 +579,59 @@ class SpinJamLyricsCard extends HTMLElement {
     img.src = hd;
   }
 
-  _setCoverArt(loUrl, hdUrl) {
+  _cssUrl(url) {
+    if (!url) return "none";
+    return `url("${String(url).replace(/"/g, "%22")}")`;
+  }
+
+  /* Crossfade low-res → HD on the blurred fill and the square together. */
+  _setStageArt(loUrl, hdUrl) {
     const lo = this._absUrl(loUrl);
     const hd = this._absUrl(hdUrl || "");
-    const apply = (url) => {
-      if (!url) {
-        this._coverArt.style.backgroundImage = "none";
-        this._coverBlur.style.backgroundImage = "none";
-        return;
-      }
-      const safe = `url("${url.replace(/"/g, "%22")}")`;
-      this._coverArt.style.backgroundImage = safe;
-      this._coverBlur.style.backgroundImage = safe;
+    const missing = stageMissingArt(lo, hd);
+    if (this._stageBg) this._stageBg.classList.toggle("empty", missing);
+    if (this._stageArtWrap) this._stageArtWrap.classList.toggle("has-art", !missing);
+    const blurs = [this._sb0, this._sb1].filter(Boolean);
+    const arts = [this._sa0, this._sa1].filter(Boolean);
+    const clear = (els) => {
+      els.forEach((el) => {
+        el.style.backgroundImage = "none";
+        el.classList.remove("show");
+      });
     };
-    apply(lo);
-    if (hd && hd !== lo) {
-      const img = new Image();
-      img.onload = () => apply(hd);
-      img.src = hd;
+    if (missing) {
+      this._stageKey = "|";
+      clear(blurs);
+      clear(arts);
+      return;
     }
+    const key = `${lo}|${hd}`;
+    if (key === this._stageKey) {
+      if (hd) this._preload(hd);
+      return;
+    }
+    this._stageKey = key;
+    const showPair = (idx, url) => {
+      const css = this._cssUrl(url);
+      [blurs, arts].forEach((els) => {
+        if (!els[idx]) return;
+        els[idx].style.backgroundImage = css;
+        els[idx].classList.add("show");
+        if (els[1 - idx]) els[1 - idx].classList.remove("show");
+      });
+      this._stageFront = idx;
+    };
+    const immediate = lo || hd;
+    const back = this._stageFront ? 0 : 1;
+    showPair(back, immediate);
+    if (!hd || !lo || hd === lo) return;
+    const img = new Image();
+    img.onload = () => {
+      if (this._stageKey !== key) return;
+      showPair(this._stageFront ? 0 : 1, hd);
+    };
+    img.onerror = () => { /* keep the low-res cover */ };
+    img.src = hd;
   }
 
   /* ---------- data ---------- */
@@ -486,12 +695,39 @@ class SpinJamLyricsCard extends HTMLElement {
   }
 
   _lyricPos() {
-    // Convention: POSITIVE offset = lyrics appear LATER → look earlier in the LRC.
+    // Positive offset delays lyrics. Applied once, on top of the playback clock
+    // (the clock already includes delivery delay; sync_offset is inside media_position).
     const live = this._liveOffsetMs();
-    if (live !== null) return this._now() - live / 1000;
-    const st = this._state;
-    const off = Number(((st && st.attributes) || {}).lyric_offset_ms || 0) / 1000;
-    return this._now() - off;
+    const off = live !== null
+      ? live
+      : Number(((this._state && this._state.attributes) || {}).lyric_offset_ms || 0);
+    return lyricLookPosition(this._now(), off);
+  }
+
+  _shouldToast() {
+    const mode = this.getAttribute("mode");
+    if (mode === "hidden") return false;
+    if (this._cfg && this._cfg.mode === "lyrics") return mode === "stage";
+    return true;
+  }
+
+  _noteOffsetToast() {
+    const next = this._liveOffsetMs();
+    const prev = this._offsetMs;
+    if (prev !== null && next !== null && prev !== next && this._shouldToast()) {
+      this._showOffsetToast(prev, next);
+    }
+    if (next !== null) this._offsetMs = next;
+  }
+
+  _showOffsetToast(previousMs, nextMs) {
+    if (!this._toast) return;
+    this._toast.textContent = lyricDelayToast(previousMs, nextMs);
+    this._toast.classList.add("show");
+    if (this._toastTimer) clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => {
+      if (this._toast) this._toast.classList.remove("show");
+    }, 2000);
   }
 
   _serverIndex(st) {
@@ -537,26 +773,36 @@ class SpinJamLyricsCard extends HTMLElement {
       this._idx = -2;
     }
 
-    const details = this._cfg.mode === "details";
-    const cover = !details && !lyricsOn;
+    const mode = this.getAttribute("mode");
+    const details = mode === "details";
+    const stage = mode === "stage";
+    if (mode === "hidden") {
+      if (this._prog) this._prog.classList.add("hidden");
+      return;
+    }
     if (details) {
       this._dt.textContent = active ? a.media_title || "" : "SpinJam";
       this._da.textContent = active ? a.media_artist || "" : "Waiting for music…";
       this._dl.textContent = active ? a.media_album_name || "" : "";
       this._setArtLayers(lo, hd);
-    } else if (cover) {
-      this._coverTitle.textContent = active ? a.media_title || "" : "SpinJam";
-      this._coverArtist.textContent = active ? a.media_artist || "Waiting for music…" : "Waiting for music…";
-      this._setCoverArt(lo, hd);
+    } else if (stage) {
+      this._stageTitle.textContent = active ? a.media_title || "SpinJam" : "SpinJam";
+      this._stageArtist.textContent = active
+        ? (a.media_artist || "")
+        : "Waiting for music…";
+      this._stageAlbum.textContent = active ? a.media_album_name || "" : "";
+      this._setStageArt(lo, hd);
     } else {
       this._head.classList.toggle("hidden", !(this._cfg.show_header || this._cfg.show_progress));
       this._titleEl.classList.toggle("hidden", !this._cfg.show_header);
       this._subEl.classList.toggle("hidden", !this._cfg.show_header);
     }
-    const wantProg = details || cover || this._cfg.show_progress;
-    this._prog.classList.toggle("hidden", !(wantProg && active && Number(a.media_duration) > 0));
+    const wantProg = details || stage || this._cfg.show_progress;
+    if (this._prog) {
+      this._prog.classList.toggle("hidden", !(wantProg && active && Number(a.media_duration) > 0));
+    }
     this._setAttrib(a);
-    if (details || cover) { this._progress(); return; }
+    if (details || stage) { this._progress(); return; }
     this._dbg.classList.toggle("hidden", !this._cfg.debug);
     this._progress();
     this._plain = status === "plain";
@@ -597,7 +843,7 @@ class SpinJamLyricsCard extends HTMLElement {
       : "";
     if (this._attrib.textContent !== label) this._attrib.textContent = label;
     const mode = this.getAttribute("mode");
-    this._attrib.classList.toggle("hidden", !label || mode === "details" || mode === "cover");
+    this._attrib.classList.toggle("hidden", !label || mode === "details" || mode === "stage" || mode === "hidden");
   }
 
   _renderList() {
@@ -706,7 +952,7 @@ class SpinJamLyricsCard extends HTMLElement {
   _progress() {
     const st = this._state;
     const dur = Number(((st && st.attributes) || {}).media_duration || 0);
-    if (!(dur > 0)) return;
+    if (!(dur > 0) || !this._fillbar || !this._tl || !this._tr) return;
     const pos = Math.min(dur, this._now());
     this._fillbar.style.transform = `scaleX(${pos / dur})`;
     const tl = this._fmt(pos), tr = this._fmt(dur);
@@ -735,10 +981,21 @@ class SpinJamLyricsCard extends HTMLElement {
   _frame() {
     this._raf = null;
     const st = this._state;
+    if (this.isConnected && this._state && this._root) {
+      const lyricsOff = (this._state.attributes || {}).lyrics_enabled === false;
+      if (lyricsOff) {
+        const next = resolveCardPresentation({
+          configuredMode: this._cfg && this._cfg.mode,
+          lyricsEnabled: false,
+          siblingShowsStage: this._siblingShowsStage(),
+        });
+        if (!this._presentation || next.mode !== this._presentation.mode) this._update();
+      }
+    }
     if (st && st.state === "playing" && this.isConnected) {
       this._progress();
       const mode = this.getAttribute("mode");
-      if (this._lines.length && !this._plain && mode !== "details" && mode !== "cover") this._tick(false);
+      if (this._lines.length && !this._plain && mode !== "details" && mode !== "stage" && mode !== "hidden") this._tick(false);
     }
     this._startLoop();
   }
@@ -755,7 +1012,7 @@ if (!customElements.get("spinjam-lyrics-card")) {
   window.customCards.push({
     type: "spinjam-lyrics-card",
     name: "SpinJam Lyrics",
-    description: "Centered lyrics, HD art, and cover layout when lyrics are off (modes: lyrics | details | cover)",
+    description: "Centered lyrics and HD art. Lyrics off switches live to one full-width stage (modes: lyrics | details | stage)",
   });
 }
 

@@ -503,6 +503,69 @@ async def test_five_failures_skip_provider_for_one_hour(
     assert qq_calls["n"] == 6
 
 
+@pytest.mark.asyncio
+async def test_lrclib_prefers_album_length_over_radio_edit() -> None:
+    def handler(url: str, kwargs: dict[str, Any]) -> _Response:
+        if url == LRCLIB_API:
+            # Wrong edit, even though the caller passed the album duration.
+            payload = _synced("[00:10.00]Radio line\n[02:50.00]Radio end")
+            payload["duration"] = 180
+            return _Response(200, payload)
+        if url == LRCLIB_SEARCH_API:
+            radio = _synced("[00:10.00]Radio line\n[02:50.00]Radio end")
+            radio["duration"] = 180
+            album = _synced("[00:10.00]Album line\n[03:20.00]Album end")
+            album["duration"] = 210
+            return _Response(200, [radio, album])
+        raise AssertionError(url)
+
+    client, _session, _clock = _client(handler)
+    found = await client.fetch(
+        artist="Futurist",
+        title="Song",
+        duration=210,
+        fallback_providers=[],
+    )
+    assert found.status == LYRICS_STATUS_SYNCED
+    assert found.result is not None
+    assert found.result.lines[0].text == "Album line"
+    assert found.result.catalog_duration == 210
+
+
+@pytest.mark.asyncio
+async def test_far_duration_is_kept_and_logged(caplog: pytest.LogCaptureFixture) -> None:
+    def handler(url: str, kwargs: dict[str, Any]) -> _Response:
+        if url == LRCLIB_API:
+            payload = _synced("[00:05.00]Only edit\n[02:00.00]Ends early")
+            payload["duration"] = 130
+            return _Response(200, payload)
+        if url == LRCLIB_SEARCH_API:
+            return _Response(200, [])
+        raise AssertionError(url)
+
+    client, _session, _clock = _client(handler)
+    with caplog.at_level(logging.INFO):
+        found = await client.fetch(
+            artist="Futurist",
+            title="Song",
+            duration=210,
+            fallback_providers=[],
+        )
+    assert found.status == LYRICS_STATUS_SYNCED
+    assert found.result is not None
+    assert found.result.lines[0].text == "Only edit"
+    assert any("differ from the player" in rec.message for rec in caplog.records)
+
+
+def test_positive_offset_reads_an_earlier_lyric_line() -> None:
+    """Positive delay looks earlier in the file, so the line appears later."""
+    from custom_components.spinjam.lyrics import LyricLine, line_at
+
+    lines = (LyricLine(10.0, "early"), LyricLine(12.0, "late"))
+    assert line_at(lines, 12.0)[0] == "late"
+    assert line_at(lines, 12.0 - 2.0)[0] == "early"
+
+
 def test_card_shows_source_footer_and_status_messages() -> None:
     text = _CARD.read_text(encoding="utf-8")
     assert "Lyrics: LRCLIB" in text

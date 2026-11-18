@@ -225,10 +225,12 @@ async def test_tracking_starts_off_when_cast_off_after_restart(
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
-    tracking = hass.states.get("switch.spinjam_tracking")
     cast_state = hass.states.get("switch.spinjam_cast")
     assert cast_state is not None and cast_state.state == STATE_OFF
-    assert tracking is not None and tracking.state == STATE_OFF
+    # A restored tracking switch must not come back; Cast off keeps tracking off.
+    assert hass.states.get("switch.spinjam_tracking") is None
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    assert coordinator.tracking_enabled is False
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
 

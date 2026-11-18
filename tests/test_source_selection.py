@@ -4,10 +4,13 @@ from datetime import datetime, timezone
 
 from custom_components.spinjam.source import (
     SourceSnapshot,
+    build_source_choices,
+    configured_source_entity_ids,
     estimate_position,
     is_line_in_source,
     is_passthrough_source,
     select_active_source,
+    select_monitored_source,
 )
 
 
@@ -198,3 +201,68 @@ def test_line_in_defers_to_vinyl() -> None:
     assert active.kind == "vinyl"
     assert active.title == "Karma Police"
     assert active.art_url == "https://example.com/ok.jpg"
+
+
+def test_source_choices_automatic_friendly_names_and_vinyl() -> None:
+    players = configured_source_entity_ids(
+        ["media_player.speaker_a", "media_player.speaker_b", "media_player.speaker_a"],
+        "media_player.turntable",
+    )
+    assert players == [
+        "media_player.speaker_a",
+        "media_player.speaker_b",
+        "media_player.turntable",
+    ]
+    choices = build_source_choices(
+        [
+            ("media_player.speaker_a", "Speaker A"),
+            ("media_player.speaker_a", "duplicate row"),
+            ("media_player.speaker_b", "Speaker A"),
+            ("media_player.turntable", None),
+        ]
+    )
+    assert [choice.label for choice in choices] == [
+        "Automatic",
+        "Speaker A",
+        "Speaker A (media_player.speaker_b)",
+        "Turntable",
+    ]
+    assert choices[0].entity_id is None
+    assert choices[2].entity_id == "media_player.speaker_b"
+    assert choices[3].entity_id == "media_player.turntable"
+
+
+def test_fixed_source_ignores_other_players() -> None:
+    snaps = [
+        SourceSnapshot(
+            entity_id="media_player.speaker_a",
+            state="playing",
+            title="Track A",
+            artist="Artist A",
+        ),
+        SourceSnapshot(
+            entity_id="media_player.speaker_b",
+            state="paused",
+            title="Track B",
+            artist="Artist B",
+        ),
+    ]
+    automatic = select_monitored_source(
+        snaps,
+        priority=["media_player.speaker_a", "media_player.speaker_b"],
+        vinyl_entity_id="media_player.turntable",
+        chosen_entity_id=None,
+    )
+    assert automatic is not None
+    assert automatic.entity_id == "media_player.speaker_a"
+
+    fixed = select_monitored_source(
+        snaps,
+        priority=["media_player.speaker_a", "media_player.speaker_b"],
+        vinyl_entity_id="media_player.turntable",
+        chosen_entity_id="media_player.speaker_b",
+        hold=automatic,
+    )
+    assert fixed is not None
+    assert fixed.entity_id == "media_player.speaker_b"
+    assert fixed.title == "Track B"

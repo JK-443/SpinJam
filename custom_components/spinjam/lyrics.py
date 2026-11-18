@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import logging
 import re
@@ -94,6 +94,12 @@ class LyricsResult:
     instrumental: bool = False
     source: str = LYRICS_PROVIDER_LRCLIB
     plain: bool = False
+    # Provider duration (LRCLIB ``duration`` / QQ ``interval``), when the API sent one.
+    catalog_duration: float | None = None
+    # Length used to compare with the player (catalog, or the last stamp).
+    reported_duration: float | None = None
+    # reported_duration - player duration. Negative means the lyrics run short.
+    duration_delta: float | None = None
 
 
 @dataclass(frozen=True)
@@ -311,6 +317,118 @@ def durations_match(wanted: float | None, found: float | None) -> bool:
     return abs(found - wanted) <= LYRICS_DURATION_TOLERANCE_SEC
 
 
+def _last_lyric_stamp(result: LyricsResult) -> float | None:
+    last: float | None = None
+    for line in result.lines:
+        stamps = [line.start, *(word.start for word in line.words)]
+        for stamp in stamps:
+            if stamp is None:
+                continue
+            last = stamp if last is None else max(last, stamp)
+    if last is None or last <= 0:
+        return None
+    return float(last)
+
+
+def lyrics_compare_duration(result: LyricsResult) -> float | None:
+    """Length used to decide whether these lyrics fit the playing edit.
+
+    Prefer the provider duration. If the last synced stamp ends well before
+    that duration (more than 3 s and more than 15% short), use the last stamp
+    so a file that runs out early is not treated as a full-length match.
+    """
+    catalog = (
+        float(result.catalog_duration)
+        if result.catalog_duration and result.catalog_duration > 0
+        else None
+    )
+    last = _last_lyric_stamp(result)
+    if catalog is None:
+        return last
+    # A one-line hit is not evidence the file ended; trust the provider duration.
+    if last is not None and len(result.lines) >= 2:
+        early = catalog - last
+        if early > max(LYRICS_DURATION_TOLERANCE_SEC, 0.15 * catalog):
+            return last
+    return catalog
+
+
+def signed_duration_delta(
+    result: LyricsResult, player_duration: float | None
+) -> float | None:
+    """Lyrics length minus player length. Negative: lyrics finish early."""
+    own = lyrics_compare_duration(result)
+    if own is None or player_duration is None:
+        return None
+    return own - float(player_duration)
+
+
+def duration_acceptable(result: LyricsResult, player_duration: float | None) -> bool:
+    """Synced lyrics must land within ~3 s of the player when both lengths are known."""
+    if result.instrumental or result.plain:
+        return True
+    delta = signed_duration_delta(result, player_duration)
+    if delta is None:
+        return True
+    return abs(delta) <= LYRICS_DURATION_TOLERANCE_SEC
+
+
+def _closest_duration(
+    results: list[LyricsResult], player_duration: float | None
+) -> LyricsResult:
+    def _key(result: LyricsResult) -> float:
+        delta = signed_duration_delta(result, player_duration)
+        if delta is None:
+            return 1e9
+        return abs(delta)
+
+    return min(results, key=_key)
+
+
+def _scaled_line(line: LyricLine, factor: float) -> LyricLine:
+    words = tuple(
+        LyricWord(start=word.start * factor, text=word.text) for word in line.words
+    )
+    return LyricLine(start=line.start * factor, text=line.text, words=words)
+
+
+# Stretch only a moderate edit mismatch. Larger gaps stay unscaled and are logged.
+LYRIC_SCALE_MAX_DELTA_SEC = 30.0
+
+
+def annotate_lyrics_duration(
+    result: LyricsResult,
+    player_duration: float | None,
+    *,
+    scale: bool = False,
+) -> LyricsResult:
+    """Record the lyrics length and delta. Optionally scale synced stamps.
+
+    Scaling is off unless the integration option is enabled. It applies only
+    when the gap is larger than the match tolerance and at most 30 seconds.
+    """
+    own = lyrics_compare_duration(result)
+    delta = signed_duration_delta(result, player_duration)
+    lines = result.lines
+    if (
+        scale
+        and delta is not None
+        and own
+        and player_duration
+        and not result.plain
+        and not result.instrumental
+        and LYRICS_DURATION_TOLERANCE_SEC < abs(delta) <= LYRIC_SCALE_MAX_DELTA_SEC
+    ):
+        factor = float(player_duration) / own
+        lines = tuple(_scaled_line(line, factor) for line in result.lines)
+    return replace(
+        result,
+        lines=lines,
+        reported_duration=own,
+        duration_delta=delta,
+    )
+
+
 def _as_float(value: Any) -> float | None:
     if value is None or value == "":
         return None
@@ -352,13 +470,21 @@ async def _read_payload(resp: Any) -> Any:
 
 
 def _lrclib_result(item: dict[str, Any]) -> LyricsResult | None:
+    catalog = _as_float(item.get("duration"))
     if item.get("instrumental"):
-        return LyricsResult(lines=(), instrumental=True, source=LYRICS_PROVIDER_LRCLIB)
+        return LyricsResult(
+            lines=(),
+            instrumental=True,
+            source=LYRICS_PROVIDER_LRCLIB,
+            catalog_duration=catalog,
+        )
     synced = item.get("enhancedLyrics") or item.get("syncedLyrics")
     lines = parse_lrc(synced if isinstance(synced, str) else None)
     if not lines:
         return None
-    return LyricsResult(lines=lines, source=LYRICS_PROVIDER_LRCLIB)
+    return LyricsResult(
+        lines=lines, source=LYRICS_PROVIDER_LRCLIB, catalog_duration=catalog
+    )
 
 
 def pick_lrclib_match(
@@ -389,6 +515,7 @@ def pick_lrclib_match(
         synced = item.get("enhancedLyrics") or item.get("syncedLyrics")
         has_sync = 0 if isinstance(synced, str) and synced.strip() else 1
         found = _as_float(item.get("duration"))
+        # Closest edit wins inside the tolerance (album length over a radio edit).
         delta = abs(found - duration) if duration is not None and found is not None else 0.0
         return (has_sync, delta)
 
@@ -444,6 +571,7 @@ def pick_qq_song(
     title: str,
     duration: float | None,
 ) -> dict[str, Any] | None:
+    ranked: list[tuple[float, dict[str, Any]]] = []
     for song in songs:
         names = _qq_singer_names(song)
         if not any(qq_artist_matches(artist, name) for name in names):
@@ -451,13 +579,18 @@ def pick_qq_song(
         songname = str(song.get("songname") or song.get("songName") or "")
         if not titles_match(title, songname):
             continue
-        if not durations_match(duration, _as_float(song.get("interval"))):
+        found = _as_float(song.get("interval"))
+        if not durations_match(duration, found):
             continue
         mid = song.get("songmid") or song.get("songMid") or song.get("mid")
         if not mid:
             continue
-        return song
-    return None
+        delta = abs(found - duration) if duration is not None and found is not None else 0.0
+        ranked.append((delta, song))
+    if not ranked:
+        return None
+    ranked.sort(key=lambda item: item[0])
+    return ranked[0][1]
 
 
 def _qq_lyric_text(payload: Any) -> str | None:
@@ -659,10 +792,14 @@ class LrcLibClient:
         saw_error = False
 
         kind, result = await self._lrclib(artist, title, album_norm, usable, budget)
+        off: list[LyricsResult] = []
+        plain: LyricsResult | None = None
         if kind == "hit" and result is not None:
             self.cache.set(cache_key, result)
             return LyricsLookup(lyrics_kind(result), result)
-        if kind in ("error", "skipped", "budget"):
+        if kind == "off" and result is not None:
+            off.append(result)
+        elif kind in ("error", "skipped", "budget"):
             saw_error = True
 
         query_title = clean_title(title) or title
@@ -677,10 +814,34 @@ class LrcLibClient:
             else:
                 continue
             if kind == "hit" and result is not None:
-                self.cache.set(cache_key, result)
-                return LyricsLookup(lyrics_kind(result), result)
-            if kind in ("error", "skipped", "budget"):
+                if result.plain:
+                    plain = result
+                else:
+                    self.cache.set(cache_key, result)
+                    return LyricsLookup(lyrics_kind(result), result)
+            elif kind == "off" and result is not None:
+                off.append(result)
+            elif kind in ("error", "skipped", "budget"):
                 saw_error = True
+
+        if off:
+            best = _closest_duration(off, usable)
+            own = lyrics_compare_duration(best)
+            delta = signed_duration_delta(best, usable)
+            _LOGGER.info(
+                "Lyrics for %s - %s differ from the player by %.1fs "
+                "(lyrics %.1fs, player %.1fs); using the closest candidate",
+                artist,
+                title,
+                0.0 if delta is None else delta,
+                0.0 if own is None else own,
+                0.0 if usable is None else usable,
+            )
+            self.cache.set(cache_key, best)
+            return LyricsLookup(lyrics_kind(best), best)
+        if plain is not None:
+            self.cache.set(cache_key, plain)
+            return LyricsLookup(lyrics_kind(plain), plain)
 
         if saw_error:
             return LyricsLookup(LYRICS_STATUS_ERROR)
@@ -757,15 +918,25 @@ class LrcLibClient:
                 return None
             return _lrclib_result(match)
 
-        result = await _get(original)
+        far: list[LyricsResult] = []
+
+        def _take(found: LyricsResult | None) -> LyricsResult | None:
+            if found is None:
+                return None
+            if duration_acceptable(found, duration):
+                return found
+            far.append(found)
+            return None
+
+        result = _take(await _get(original))
         if result is not None:
             self._health.ok(LYRICS_PROVIDER_LRCLIB)
             return "hit", result
         if budget_hit:
             return self._lrclib_incomplete(saw_error)
 
-        result = await _search(
-            {"track_name": original, "artist_name": artist}, original
+        result = _take(
+            await _search({"track_name": original, "artist_name": artist}, original)
         )
         if result is not None:
             self._health.ok(LYRICS_PROVIDER_LRCLIB)
@@ -774,14 +945,14 @@ class LrcLibClient:
             return self._lrclib_incomplete(saw_error)
 
         if cleaned and cleaned.casefold() != original.casefold():
-            result = await _get(cleaned)
+            result = _take(await _get(cleaned))
             if result is not None:
                 self._health.ok(LYRICS_PROVIDER_LRCLIB)
                 return "hit", result
             if budget_hit:
                 return self._lrclib_incomplete(saw_error)
-            result = await _search(
-                {"track_name": cleaned, "artist_name": artist}, cleaned
+            result = _take(
+                await _search({"track_name": cleaned, "artist_name": artist}, cleaned)
             )
             if result is not None:
                 self._health.ok(LYRICS_PROVIDER_LRCLIB)
@@ -790,12 +961,15 @@ class LrcLibClient:
                 return self._lrclib_incomplete(saw_error)
 
         query_title = cleaned or original
-        result = await _search({"q": f"{artist} {query_title}"}, query_title)
+        result = _take(await _search({"q": f"{artist} {query_title}"}, query_title))
         if result is not None:
             self._health.ok(LYRICS_PROVIDER_LRCLIB)
             return "hit", result
         if budget_hit:
             return self._lrclib_incomplete(saw_error)
+        if far:
+            self._health.ok(LYRICS_PROVIDER_LRCLIB)
+            return "off", _closest_duration(far, duration)
         if saw_error:
             self._health.fail(LYRICS_PROVIDER_LRCLIB)
             return "error", None
@@ -875,7 +1049,11 @@ class LrcLibClient:
             self._health.ok(provider)
             return "miss", None
         self._health.ok(provider)
-        return "hit", LyricsResult(lines=lines, source=provider)
+        catalog = _as_float(song.get("interval"))
+        result = LyricsResult(lines=lines, source=provider, catalog_duration=catalog)
+        if duration_acceptable(result, duration):
+            return "hit", result
+        return "off", result
 
     async def _lyricsovh(
         self,

@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   PlaybackClock,
   arrivalPosition,
+  lyricLookPosition,
   IGNORE_ERR_S,
 } from "../custom_components/spinjam/www/spinjam-playback-clock.js";
 
@@ -160,6 +161,45 @@ test("0.8s error corrects gradually with no jump", () => {
   assert.ok(p1 > p0);
   // Should not hard-jump by the full 0.8s in one frame.
   assert.ok(p1 - p0 < 0.8);
+});
+
+test("positive offset delays lyrics; it is not added on top of the clock", () => {
+  assert.equal(lyricLookPosition(30, 2000), 28);
+  assert.equal(lyricLookPosition(30, -2000), 32);
+  assert.equal(lyricLookPosition(30, 0), 30);
+  assert.ok(lyricLookPosition(30, 2000) < 30);
+});
+
+test("a steady 3:30 track ends its clock near 3:30", () => {
+  const clock = new PlaybackClock();
+  const duration = 210;
+  let nowMs = 1_000_000;
+  let nowPerf = 0;
+  const delivery = 400;
+  for (let t = 0; t <= duration; t += 1) {
+    clock.observe({
+      mediaPosition: t,
+      mediaPositionUpdatedAtMs: nowMs,
+      lastUpdatedMs: nowMs,
+      nowMs: nowMs + delivery,
+      nowPerf,
+      playing: true,
+      trackKey: "Song|Artist",
+    });
+    const atSample = clock.position(nowPerf);
+    assert.ok(atSample <= t + 0.25, `sample t=${t} pos=${atSample}`);
+    nowMs += 1000;
+    nowPerf += 1000;
+    if (t < duration) {
+      const advanced = clock.position(nowPerf);
+      assert.ok(advanced < t + 1.35, `ran ahead t=${t} pos=${advanced}`);
+    }
+  }
+  const end = clock.position(nowPerf);
+  assert.ok(Math.abs(end - (duration + 1)) < 0.35, `end ${end}`);
+  const looked = lyricLookPosition(end, 2000);
+  assert.ok(looked < end);
+  assert.ok(Math.abs(looked - (end - 2)) < 0.05);
 });
 
 test("ignore sub-threshold error", () => {

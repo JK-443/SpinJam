@@ -17,6 +17,7 @@ _LOGGER = logging.getLogger(__name__)
 WWW_DIR = Path(__file__).parent / "www"
 CARD_FILENAME = "spinjam-lyrics-card.js"
 CLOCK_FILENAME = "spinjam-playback-clock.js"
+LAYOUT_FILENAME = "spinjam-card-layout.js"
 CARD_URL_PATH = f"/{DOMAIN}/{CARD_FILENAME}"
 
 # Populated once via executor (or sync fallback in unit tests).
@@ -26,7 +27,7 @@ _card_hash: str | None = None
 def _compute_card_file_hash() -> str:
     """Hash card + clock module bytes (blocking — run in executor)."""
     hasher = hashlib.sha256()
-    for name in (CARD_FILENAME, CLOCK_FILENAME):
+    for name in (CARD_FILENAME, CLOCK_FILENAME, LAYOUT_FILENAME):
         path = WWW_DIR / name
         if path.is_file():
             hasher.update(path.read_bytes())
