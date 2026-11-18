@@ -85,7 +85,7 @@ def test_config_flow_step_schemas_serialize() -> None:
     # Mirror schemas the steps would show (empty defaults / options defaults).
     _assert_serializable(_schema())
     _assert_serializable(_schema(options=True))
-    assert flow.VERSION == 2
+    assert flow.VERSION == 3
 
 
 @pytest.mark.asyncio

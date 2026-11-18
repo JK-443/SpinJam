@@ -21,6 +21,8 @@ from custom_components.spinjam.const import (
 from custom_components.spinjam.dashboard import (
     DETAILS_CARD,
     LYRICS_CARD,
+    async_create_spinjam_dashboard,
+    upgrade_controls_cards,
     spinjam_tv_view_config,
     validate_dashboard_url_path,
 )
@@ -44,6 +46,99 @@ def test_dashboard_path_requires_hyphen() -> None:
         validate_dashboard_url_path("SpinJam-TV")
     with pytest.raises(vol.Invalid):
         validate_dashboard_url_path("bad_path")
+
+
+def test_upgrade_controls_cards_is_idempotent() -> None:
+    user = {"type": "markdown", "content": "A note added on the controls view"}
+    cards = [
+        {"type": "tile", "entity": "switch.spinjam_cast", "name": "My cast"},
+        {"type": "tile", "entity": "switch.spinjam_tracking", "name": "Tracking"},
+        {"type": "tile", "entity": "switch.spinjam_lyrics", "name": "Lyrics"},
+        {"type": "tile", "entity": "switch.spinjam_lyrics", "name": "Lyrics again"},
+        user,
+        {
+            "type": "entities",
+            "entities": ["switch.spinjam_tracking", "light.example_lamp"],
+        },
+    ]
+    once = upgrade_controls_cards(cards)
+    twice = upgrade_controls_cards(once)
+    assert twice == once
+    entities = [card.get("entity") for card in once]
+    assert "switch.spinjam_tracking" not in entities
+    assert entities.count("switch.spinjam_lyrics") == 1
+    assert "select.spinjam_display" in entities
+    assert "select.spinjam_source" in entities
+    assert once[0]["name"] == "My cast"
+    assert user in once
+    nested = next(card for card in once if card.get("type") == "entities")
+    assert nested["entities"] == ["light.example_lamp"]
+    assert "switch.spinjam_cast" not in [
+        item for item in nested["entities"]
+    ]
+
+
+@pytest.mark.asyncio
+async def test_create_dashboard_upgrades_in_place_twice(hass: HomeAssistant) -> None:
+    class _Store:
+        def __init__(self) -> None:
+            self.config = {
+                "views": [
+                    {
+                        "title": "Now",
+                        "path": "now",
+                        "cards": [{"type": "markdown", "content": "keep the now view"}],
+                    },
+                    {
+                        "title": "Controls",
+                        "path": "controls",
+                        "cards": [
+                            {
+                                "type": "tile",
+                                "entity": "switch.spinjam_tracking",
+                                "name": "Tracking",
+                            },
+                            {
+                                "type": "tile",
+                                "entity": "switch.spinjam_cast",
+                                "name": "My cast",
+                            },
+                            {"type": "markdown", "content": "user note"},
+                        ],
+                    },
+                ]
+            }
+
+        async def async_load(self, force: bool = False) -> dict:
+            _ = force
+            return self.config
+
+        async def async_save(self, config: dict) -> None:
+            self.config = config
+
+    store = _Store()
+    hass.data["lovelace"] = {
+        "dashboards": {"spinjam-tv": store},
+        "dashboards_collection": AsyncMock(),
+    }
+    first = await async_create_spinjam_dashboard(hass, dashboard_path="spinjam-tv")
+    assert first["created"] is False
+    controls = next(view for view in store.config["views"] if view["path"] == "controls")
+    entities = [card.get("entity") for card in controls["cards"]]
+    assert "switch.spinjam_tracking" not in entities
+    assert entities.count("switch.spinjam_cast") == 1
+    assert controls["cards"][0]["name"] == "My cast"
+    assert any(card.get("content") == "user note" for card in controls["cards"])
+    now = next(view for view in store.config["views"] if view["path"] == "now")
+    assert now["cards"][0]["content"] == "keep the now view"
+    snapshot = [dict(card) for card in controls["cards"]]
+
+    second = await async_create_spinjam_dashboard(hass, dashboard_path="spinjam-tv")
+    assert second["created"] is False
+    controls_again = next(
+        view for view in store.config["views"] if view["path"] == "controls"
+    )
+    assert controls_again["cards"] == snapshot
 
 
 def test_tv_view_layout_details_left_lyrics_right() -> None:
@@ -84,7 +179,7 @@ async def test_migrate_v2_negates_lyric_offset_and_dashboard(hass: HomeAssistant
     ):
         assert await async_migrate_entry(hass, entry) is True
 
-    assert entry.version == 2
+    assert entry.version == 3
     assert entry.data[CONF_LYRIC_OFFSET_MS] == 1500
     assert entry.options[CONF_LYRIC_OFFSET_MS] == 1500
     assert entry.data[CONF_DASHBOARD_PATH] == DEFAULT_DASHBOARD_PATH

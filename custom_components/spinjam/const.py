@@ -11,6 +11,8 @@ CONF_DISPLAYS = "displays"
 CONF_DISPLAY_ENTITY = "display_entity"
 CONF_SYNC_OFFSET_MS = "sync_offset_ms"
 CONF_LYRIC_OFFSET_MS = "lyric_offset_ms"
+CONF_LYRIC_NUDGE_MS = "lyric_nudge_ms"
+CONF_SCALE_LYRICS = "scale_lyrics"
 CONF_LYRICS_ENABLED = "lyrics_enabled"
 CONF_FALLBACK_PROVIDERS = "fallback_providers"
 CONF_UPDATE_INTERVAL = "update_interval"
@@ -27,6 +29,8 @@ CONF_PREFETCH = "prefetch"
 DEFAULT_NAME = "SpinJam Now Playing"
 DEFAULT_SYNC_OFFSET_MS = 0
 DEFAULT_LYRIC_OFFSET_MS = 0
+DEFAULT_LYRIC_NUDGE_MS = 250
+DEFAULT_SCALE_LYRICS = False
 DEFAULT_LYRICS_ENABLED = True
 # lyrics.ovh on, QQ Music off. Saved list order is the lookup order.
 DEFAULT_FALLBACK_PROVIDERS = ("lyricsovh",)
@@ -58,7 +62,10 @@ ATTR_LYRIC_LINES = "lyric_lines"
 ATTR_LYRIC_OFFSET_MS = "lyric_offset_ms"
 ATTR_LYRICS_STATUS = "lyrics_status"
 ATTR_LYRICS_SOURCE = "lyrics_source"
+ATTR_LYRICS_DURATION = "lyrics_duration"
+ATTR_LYRICS_DURATION_DELTA = "lyrics_duration_delta"
 ATTR_ACTIVE_SOURCE = "active_source"
+ATTR_SELECTED_SOURCE = "selected_source"
 ATTR_SOURCE_KIND = "source_kind"
 ATTR_DISPLAYS = "displays"
 ATTR_SELECTED_DISPLAY = "selected_display"
@@ -158,10 +165,32 @@ LYRICS_STATUS_ERROR = "error"
 LYRICS_STATUS_DISABLED = "disabled"
 
 SELECT_DISPLAY_ENTITY_ID = "select.spinjam_display"
+SELECT_SOURCE_ENTITY_ID = "select.spinjam_source"
 SWITCH_CAST_ENTITY_ID = "switch.spinjam_cast"
+# Retired in 0.7.0. Kept so upgrades can drop the registry entry and the tile.
 SWITCH_TRACKING_ENTITY_ID = "switch.spinjam_tracking"
+LEGACY_TRACKING_UNIQUE_ID = "spinjam_tracking"
 SWITCH_LYRICS_ENTITY_ID = "switch.spinjam_lyrics"
 NUMBER_LYRIC_OFFSET_ENTITY_ID = "number.spinjam_lyric_offset"
+BUTTON_LYRICS_EARLIER_ENTITY_ID = "button.spinjam_lyrics_earlier"
+BUTTON_LYRICS_LATER_ENTITY_ID = "button.spinjam_lyrics_later"
+BUTTON_LYRIC_DELAY_RESET_ENTITY_ID = "button.spinjam_reset_lyric_delay"
+SENSOR_LYRIC_DELAY_ENTITY_ID = "sensor.spinjam_lyric_delay"
+
+# Device page, primary entities then the configuration category.
+# Cast, Display, Source, Lyrics, Now Playing; configuration: Lyric offset.
+DEVICE_PAGE_TRANSLATION_KEYS = (
+    ("switch", "cast", "Cast"),
+    ("select", "display", "Display"),
+    ("select", "source", "Source"),
+    ("switch", "lyrics", "Lyrics"),
+    ("media_player", "now_playing", "Now Playing"),
+    ("number", "lyric_offset", "Lyric delay"),
+    ("button", "lyrics_earlier", "Lyrics earlier"),
+    ("button", "lyrics_later", "Lyrics later"),
+    ("button", "reset_lyric_delay", "Reset lyric delay"),
+    ("sensor", "lyric_delay", "Current delay"),
+)
 
 ARTWORK_DISK_CACHE_DIR = "spinjam"
 ARTWORK_DISK_CACHE_FILE = "artwork_cache.json"

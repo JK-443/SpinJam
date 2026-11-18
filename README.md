@@ -44,7 +44,7 @@ When a configured Sonos/Port player’s source is **Line-in**, SpinJam uses the 
 6. Optionally select **Displays** (Google Cast targets), e.g. `media_player.example_tv`
 7. Enable lyrics; leave sync / lyric offsets at `0` until you calibrate
 
-The TV card ships with the integration (`/spinjam/spinjam-lyrics-card.js?v=…`, modes `details` / `lyrics`) — no separate frontend install. `spinjam-now-playing-card` remains a deprecated alias.
+The TV card ships with the integration (`/spinjam/spinjam-lyrics-card.js?v=…`, modes `details` / `lyrics`) — no separate frontend install. With lyrics off, the Cast view is one full-width stage instead of two panels. `spinjam-now-playing-card` remains a deprecated alias.
 
 ### Option B — Manual
 
@@ -57,13 +57,14 @@ Copy `custom_components/spinjam` into your HA `config/custom_components/spinjam`
 3. Configure SpinJam options: Cast displays + dashboard/view paths (defaults `spinjam-tv` / `now`).  
 4. Use `switch.spinjam_cast`, or `spinjam.start` / `spinjam.stop` (or automate on Port Line-in).
 
-### Switches
+### Controls
 
 | Entity | Role |
 | --- | --- |
-| `switch.spinjam_cast` | **Master on/off.** On = wake + cast + tracking on (`spinjam.start`); off = quit Cast, tracking off, clear now-playing (`spinjam.stop`). |
-| `switch.spinjam_tracking` | On (default) follows sources / polls; off clears now-playing and also stops Cast if active. Tracking on does not start Cast. |
-| `switch.spinjam_lyrics` | On (default) fetches/shows lyrics; off switches the TV card to a cover-art layout and sets `lyrics_status` to `disabled` (live, no Cast restart). |
+| `switch.spinjam_cast` | **On/off.** On = wake + cast + tracking (`spinjam.start`); off = quit Cast, tracking off, clear now-playing (`spinjam.stop`). Tracking is derived from Cast. The old `switch.spinjam_tracking` entity is removed on upgrade. |
+| `select.spinjam_display` | Which configured Cast display to use. |
+| `select.spinjam_source` | **Source.** `Automatic` (default) ranks configured players (playing over paused, sticky within a track). Any other option follows only that player, including the vinyl player when one is configured. Restored across restarts. |
+| `switch.spinjam_lyrics` | On (default) fetches/shows the two-panel lyrics layout. Off switches live to one full-width stage (blurred cover, centred art, title, artist, album, slim progress) and sets `lyrics_status` to `disabled`. No Cast restart. |
 
 Options: **Built-in casting** (default on) — when off, start/stop and the Cast switch only fire `spinjam_start` / `spinjam_stop` so you can cast from your own automations without double-casting. **Recast on startup** (default off) — only then will a previously-on Cast switch re-cast after an HA restart. **Fallback lyrics providers** (default lyrics.ovh) run in list order after LRCLIB misses. QQ Music is an unofficial endpoint, for personal use, and is off until selected. It can return synced lyrics; lyrics.ovh returns plain text.
 
@@ -81,8 +82,8 @@ Options: **Built-in casting** (default on) — when off, start/stop and the Cast
 2. Open Developer Tools → States → `media_player.spinjam_now_playing`.  
 3. Confirm artist/title/album/art; with lyrics enabled, check `lyric_current` / `lyric_next` / `lyric_lines`.  
 4. Services: `spinjam.identify`, `spinjam.set_sync_offset`, `spinjam.select_album`, `spinjam.clear_lock`, `spinjam.start`, `spinjam.stop`.
-5. Entities: `select.spinjam_display`, `switch.spinjam_cast`, `switch.spinjam_tracking`, `switch.spinjam_lyrics`, `number.spinjam_lyric_offset`.
-6. Attributes include `displays`, `selected_display`, `lyric_offset_ms`, `lyric_lines` (optional `words`), `lyrics_status`, `lyrics_source`, `tracking_enabled`, `cast_active`, `artwork_hd`, `artwork_source`, `artwork_next`, `lyrics_enabled`.
+5. Device page order: Cast, Display, Source, Lyrics, Now Playing. Configuration: Lyric offset (`number.spinjam_lyric_offset`).
+6. Attributes include `displays`, `selected_display`, `selected_source` (`Automatic` or a `media_player` entity id), `active_source`, `lyric_offset_ms`, `lyrics_duration`, `lyrics_duration_delta`, `lyric_lines` (optional `words`), `lyrics_status`, `lyrics_source`, `tracking_enabled`, `cast_active`, `artwork_hd`, `artwork_source`, `artwork_next`, `lyrics_enabled`.
 
 ## Vinyl capture node (optional source)
 

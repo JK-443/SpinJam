@@ -18,8 +18,10 @@ from .const import (
     CONF_DISPLAYS,
     CONF_FALLBACK_PROVIDERS,
     CONF_HD_ARTWORK,
+    CONF_LYRIC_NUDGE_MS,
     CONF_LYRIC_OFFSET_MS,
     CONF_LYRICS_ENABLED,
+    CONF_SCALE_LYRICS,
     CONF_POWER_OFF_DISPLAY_ON_STOP,
     CONF_PREFETCH,
     CONF_RECAST_INTERVAL,
@@ -33,8 +35,10 @@ from .const import (
     DEFAULT_DASHBOARD_PATH,
     DEFAULT_FALLBACK_PROVIDERS,
     DEFAULT_HD_ARTWORK,
+    DEFAULT_LYRIC_NUDGE_MS,
     DEFAULT_LYRIC_OFFSET_MS,
     DEFAULT_LYRICS_ENABLED,
+    DEFAULT_SCALE_LYRICS,
     DEFAULT_NAME,
     DEFAULT_POWER_OFF_DISPLAY_ON_STOP,
     DEFAULT_PREFETCH,
@@ -253,6 +257,14 @@ def _schema(defaults: dict[str, Any] | None = None, *, options: bool = False) ->
             CONF_PREFETCH,
             default=defaults.get(CONF_PREFETCH, DEFAULT_PREFETCH),
         )] = _boolean_selector()
+        fields[vol.Required(
+            CONF_LYRIC_NUDGE_MS,
+            default=defaults.get(CONF_LYRIC_NUDGE_MS, DEFAULT_LYRIC_NUDGE_MS),
+        )] = _ms_offset_selector(50, 2000)
+        fields[vol.Required(
+            CONF_SCALE_LYRICS,
+            default=defaults.get(CONF_SCALE_LYRICS, DEFAULT_SCALE_LYRICS),
+        )] = _boolean_selector()
     return vol.Schema(fields)
 
 
@@ -319,6 +331,13 @@ def _validate_flow_input(
         else:
             user_input[CONF_RECAST_INTERVAL] = interval
 
+        if CONF_LYRIC_NUDGE_MS in user_input:
+            nudge = _coerce_int(user_input.get(CONF_LYRIC_NUDGE_MS))
+            if nudge is None or not 50 <= nudge <= 2000:
+                errors[CONF_LYRIC_NUDGE_MS] = "invalid_lyric_nudge"
+            else:
+                user_input[CONF_LYRIC_NUDGE_MS] = nudge
+
     return errors
 
 
@@ -335,7 +354,7 @@ async def _async_validate_cast_displays(
 class SpinJamConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for SpinJam."""
 
-    VERSION = 2
+    VERSION = 3
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
         if self._async_current_entries():

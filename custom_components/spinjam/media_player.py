@@ -18,6 +18,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     ATTR_ACTIVE_SOURCE,
+    ATTR_SELECTED_SOURCE,
     ATTR_ALBUM_LOCK,
     ATTR_ARTWORK_HD,
     ATTR_ARTWORK_NEXT,
@@ -27,6 +28,8 @@ from .const import (
     ATTR_LYRIC_LINES,
     ATTR_LYRIC_NEXT,
     ATTR_LYRIC_OFFSET_MS,
+    ATTR_LYRICS_DURATION,
+    ATTR_LYRICS_DURATION_DELTA,
     ATTR_LYRICS_ENABLED,
     ATTR_LYRICS_SOURCE,
     ATTR_LYRICS_STATUS,
@@ -36,6 +39,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import SpinJamCoordinator
+from .source import SOURCE_AUTOMATIC
 
 
 async def async_setup_entry(
@@ -50,8 +54,10 @@ async def async_setup_entry(
 class SpinJamMediaPlayer(CoordinatorEntity[SpinJamCoordinator], MediaPlayerEntity):
     """Expose aggregated now-playing as a single media_player."""
 
-    _attr_has_entity_name = False
-    _attr_name = "SpinJam Now Playing"
+    _attr_has_entity_name = True
+    _attr_translation_key = "now_playing"
+    _attr_name = "Now Playing"
+    _attr_icon = "mdi:album"
     _attr_supported_features = MediaPlayerEntityFeature(0)
     _attr_media_content_type = MediaType.MUSIC
 
@@ -89,6 +95,8 @@ class SpinJamMediaPlayer(CoordinatorEntity[SpinJamCoordinator], MediaPlayerEntit
             None if data.lyric_lines is None else len(data.lyric_lines),
             data.lyrics_status,
             data.lyrics_source,
+            data.lyrics_duration,
+            data.lyrics_duration_delta,
             data.sync_offset_ms,
             data.lyric_offset_ms,
             data.album_lock,
@@ -99,6 +107,7 @@ class SpinJamMediaPlayer(CoordinatorEntity[SpinJamCoordinator], MediaPlayerEntit
             self.coordinator.tracking_enabled,
             self.coordinator.cast_active,
             self.coordinator.selected_display,
+            self.coordinator.selected_source_entity_id,
             # Include position clock only when media_position is present.
             data.position_updated_at if active and active.position is not None else None,
         )
@@ -165,6 +174,8 @@ class SpinJamMediaPlayer(CoordinatorEntity[SpinJamCoordinator], MediaPlayerEntit
             ATTR_LYRIC_LINES: data.lyric_lines,
             ATTR_LYRICS_STATUS: data.lyrics_status,
             ATTR_LYRICS_SOURCE: data.lyrics_source,
+            ATTR_LYRICS_DURATION: data.lyrics_duration,
+            ATTR_LYRICS_DURATION_DELTA: data.lyrics_duration_delta,
             ATTR_SYNC_OFFSET_MS: data.sync_offset_ms,
             ATTR_LYRIC_OFFSET_MS: data.lyric_offset_ms,
             ATTR_ALBUM_LOCK: data.album_lock,
@@ -174,10 +185,13 @@ class SpinJamMediaPlayer(CoordinatorEntity[SpinJamCoordinator], MediaPlayerEntit
             ATTR_ARTWORK_SOURCE: data.artwork_source,
             ATTR_ARTWORK_NEXT: data.artwork_next,
             ATTR_LYRICS_ENABLED: data.lyrics_enabled,
+            ATTR_SELECTED_SOURCE: (
+                self.coordinator.selected_source_entity_id or SOURCE_AUTOMATIC
+            ),
+            ATTR_ACTIVE_SOURCE: active.entity_id if active else None,
             "tracking_enabled": self.coordinator.tracking_enabled,
             "cast_active": self.coordinator.cast_active,
         }
         if active:
-            attrs[ATTR_ACTIVE_SOURCE] = active.entity_id
             attrs[ATTR_SOURCE_KIND] = active.kind
         return attrs

@@ -257,3 +257,90 @@ def select_active_source(
     candidates.sort(key=lambda item: (item[0], item[1], item[2]))
     _paused, _prio, _rec, snap, kind = candidates[0]
     return _active_from_snap(snap, kind=kind, sync_offset_ms=sync_offset_ms, now=now)
+
+
+# Select option for "follow the configured ranking". Not an entity id.
+SOURCE_AUTOMATIC = "Automatic"
+
+
+def configured_source_entity_ids(
+    source_players: list[str],
+    vinyl_entity_id: str | None = None,
+) -> list[str]:
+    """Source players in config order, with the vinyl player appended once."""
+    ordered: list[str] = []
+    for entity_id in source_players:
+        if entity_id and entity_id not in ordered:
+            ordered.append(entity_id)
+    if vinyl_entity_id and vinyl_entity_id not in ordered:
+        ordered.append(vinyl_entity_id)
+    return ordered
+
+
+def _fallback_source_label(entity_id: str) -> str:
+    object_id = entity_id.split(".", 1)[-1]
+    return object_id.replace("_", " ").strip().title() or entity_id
+
+
+@dataclass(frozen=True)
+class SourceChoice:
+    """One option on ``select.spinjam_source``."""
+
+    label: str
+    entity_id: str | None  # None → automatic ranking
+
+
+def build_source_choices(
+    players: list[tuple[str, str | None]],
+) -> list[SourceChoice]:
+    """Automatic, then each player by friendly name.
+
+    ``players`` is ``(entity_id, friendly_name)`` in the order to show.
+    Duplicate entity ids are skipped. Duplicate labels gain the entity id.
+    """
+    choices = [SourceChoice(SOURCE_AUTOMATIC, None)]
+    used_labels = {SOURCE_AUTOMATIC}
+    seen_ids: set[str] = set()
+    for entity_id, friendly_name in players:
+        if not entity_id or entity_id in seen_ids:
+            continue
+        seen_ids.add(entity_id)
+        base = (friendly_name or "").strip() or _fallback_source_label(entity_id)
+        label = base
+        if label in used_labels:
+            label = f"{base} ({entity_id})"
+        used_labels.add(label)
+        choices.append(SourceChoice(label, entity_id))
+    return choices
+
+
+def select_monitored_source(
+    snapshots: list[SourceSnapshot],
+    *,
+    priority: list[str],
+    vinyl_entity_id: str | None,
+    chosen_entity_id: str | None = None,
+    sync_offset_ms: int = 0,
+    now: datetime | None = None,
+    hold: ActiveSource | None = None,
+) -> ActiveSource | None:
+    """Automatic ranking, or exactly one player when the user picked one.
+
+    A fixed choice does not fall through to another player and does not
+    substitute the vinyl entity unless that entity is the one that was chosen.
+    """
+    if chosen_entity_id:
+        snapshots = [snap for snap in snapshots if snap.entity_id == chosen_entity_id]
+        priority = [chosen_entity_id]
+        if vinyl_entity_id != chosen_entity_id:
+            vinyl_entity_id = None
+        if hold is not None and hold.entity_id != chosen_entity_id:
+            hold = None
+    return select_active_source(
+        snapshots,
+        priority=priority,
+        vinyl_entity_id=vinyl_entity_id,
+        sync_offset_ms=sync_offset_ms,
+        now=now,
+        hold=hold,
+    )

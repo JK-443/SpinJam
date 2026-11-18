@@ -39,6 +39,8 @@ from .const import (
     ATTR_LYRIC_LINES,
     ATTR_LYRIC_NEXT,
     ATTR_LYRIC_OFFSET_MS,
+    ATTR_LYRICS_DURATION,
+    ATTR_LYRICS_DURATION_DELTA,
     ATTR_LYRICS_ENABLED,
     ATTR_LYRICS_SOURCE,
     ATTR_LYRICS_STATUS,
@@ -51,8 +53,10 @@ from .const import (
     CONF_DISPLAYS,
     CONF_FALLBACK_PROVIDERS,
     CONF_HD_ARTWORK,
+    CONF_LYRIC_NUDGE_MS,
     CONF_LYRIC_OFFSET_MS,
     CONF_LYRICS_ENABLED,
+    CONF_SCALE_LYRICS,
     CONF_POWER_OFF_DISPLAY_ON_STOP,
     CONF_PREFETCH,
     CONF_RECAST_INTERVAL,
@@ -65,8 +69,10 @@ from .const import (
     DEFAULT_BUILTIN_CASTING,
     DEFAULT_FALLBACK_PROVIDERS,
     DEFAULT_HD_ARTWORK,
+    DEFAULT_LYRIC_NUDGE_MS,
     DEFAULT_LYRIC_OFFSET_MS,
     DEFAULT_LYRICS_ENABLED,
+    DEFAULT_SCALE_LYRICS,
     DEFAULT_POWER_OFF_DISPLAY_ON_STOP,
     DEFAULT_PREFETCH,
     DEFAULT_SYNC_OFFSET_MS,
@@ -94,18 +100,24 @@ from .lyrics import (
     LyricsCache,
     LyricsLookup,
     LyricsResult,
+    annotate_lyrics_duration,
     line_at,
     lines_payload,
     lyrics_kind,
     normalize_fallback_providers,
 )
 from .next_track import async_resolve_next_track
-from .source import ActiveSource, select_active_source, snapshot_from_state
+from .source import (
+    SOURCE_AUTOMATIC,
+    ActiveSource,
+    select_monitored_source,
+    snapshot_from_state,
+)
 
 if TYPE_CHECKING:
     from .number import SpinJamLyricOffsetNumber
-    from .select import SpinJamDisplaySelect
-    from .switch import SpinJamCastSwitch, SpinJamLyricsSwitch, SpinJamTrackingSwitch
+    from .select import SpinJamDisplaySelect, SpinJamSourceSelect
+    from .switch import SpinJamCastSwitch, SpinJamLyricsSwitch
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -139,6 +151,8 @@ class SpinJamData:
     lyrics: LyricsResult | None = None
     lyrics_status: str | None = None
     lyrics_source: str | None = None
+    lyrics_duration: float | None = None
+    lyrics_duration_delta: float | None = None
     album_lock: str | None = None
     sync_offset_ms: int = 0
     lyric_offset_ms: int = 0
@@ -160,7 +174,7 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         interval = float(options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL))
         self._poll_interval = timedelta(seconds=max(0.5, interval))
         # Tracking starts off after HA restart (Cast sessions do not survive).
-        # The cast/tracking switches align this during async_added_to_hass.
+        # Cast on (switch or spinjam.start) enables it; Cast off disables it.
         super().__init__(
             hass,
             _LOGGER,
@@ -175,6 +189,11 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             tracking_enabled=False,
             lyrics_enabled=True,
         )
+        # Snapshot of the configured delay. Nudges update the live value only,
+        # so Reset returns here until the options flow reloads the entry.
+        self._lyric_offset_baseline = int(
+            options.get(CONF_LYRIC_OFFSET_MS, DEFAULT_LYRIC_OFFSET_MS)
+        )
         self._lyrics_client: LrcLibClient | None = None
         self._track_lyrics: _TrackLyrics | None = None
         self._lyrics_task: asyncio.Task[Any] | None = None
@@ -184,9 +203,11 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         self._tracked: list[str] = []
         self._last_artwork_key: str | None = None
         self.display_select: SpinJamDisplaySelect | None = None
+        self.source_select: SpinJamSourceSelect | None = None
         self.selected_display: str | None = None
+        # None → Automatic ranking. An entity id follows only that player.
+        self.selected_source_entity_id: str | None = None
         self.cast_switch: SpinJamCastSwitch | None = None
-        self.tracking_switch: SpinJamTrackingSwitch | None = None
         self.lyrics_switch: SpinJamLyricsSwitch | None = None
         self.lyric_offset_number: SpinJamLyricOffsetNumber | None = None
         self._cast_active = False
@@ -289,6 +310,8 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             "lyrics": None,
             "lyrics_status": None,
             "lyrics_source": None,
+            "lyrics_duration": None,
+            "lyrics_duration_delta": None,
         }
         if not self.lyrics_enabled:
             empty["lyrics_status"] = LYRICS_STATUS_DISABLED
@@ -337,6 +360,8 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             "lyrics": lyrics if keep else None,
             "lyrics_status": status,
             "lyrics_source": source if keep else None,
+            "lyrics_duration": None if lyrics is None else lyrics.reported_duration,
+            "lyrics_duration_delta": None if lyrics is None else lyrics.duration_delta,
         }
 
     def _publish_lyrics_state(self) -> None:
@@ -375,6 +400,10 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         if self._track_lyrics is None or self._track_lyrics.key != key:
             return
         status, result, source = _coerce_lookup(outcome)
+        if result is not None:
+            result = annotate_lyrics_duration(
+                result, duration, scale=self.scale_lyrics
+            )
         self._track_lyrics = _TrackLyrics(
             key=key,
             status=status,
@@ -446,6 +475,20 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         return int(self.data.lyric_offset_ms)
 
     @property
+    def scale_lyrics(self) -> bool:
+        """Proportionally stretch synced stamps when the edit is only slightly off."""
+        return bool(self._options().get(CONF_SCALE_LYRICS, DEFAULT_SCALE_LYRICS))
+
+    @property
+    def lyric_nudge_ms(self) -> int:
+        raw = self._options().get(CONF_LYRIC_NUDGE_MS, DEFAULT_LYRIC_NUDGE_MS)
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            value = DEFAULT_LYRIC_NUDGE_MS
+        return max(50, min(2000, value))
+
+    @property
     def builtin_casting(self) -> bool:
         return bool(self._options().get(CONF_BUILTIN_CASTING, DEFAULT_BUILTIN_CASTING))
 
@@ -463,7 +506,13 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
 
     @property
     def tracking_enabled(self) -> bool:
+        """Source following. Driven by Cast start/stop, not a switch."""
         return self._tracking_enabled
+
+    @property
+    def selected_source(self) -> str:
+        """Chosen source: ``Automatic`` or a media_player entity id."""
+        return self.selected_source_entity_id or SOURCE_AUTOMATIC
 
     async def async_setup(self) -> None:
         self._async_watch_sources()
@@ -595,6 +644,8 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             None if data.lyric_lines is None else len(data.lyric_lines),
             data.lyrics_status,
             data.lyrics_source,
+            data.lyrics_duration,
+            data.lyrics_duration_delta,
             data.sync_offset_ms,
             data.lyric_offset_ms,
             data.album_lock,
@@ -608,6 +659,7 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             data.position_updated_at if active and active.position is not None else None,
             self.selected_display,
             tuple(self.displays),
+            self.selected_source_entity_id,
         )
 
     def _publish_data(self, data: SpinJamData) -> SpinJamData:
@@ -618,7 +670,14 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         self._last_publish_fingerprint = fingerprint
         return data
 
+    def _sync_select_entities(self) -> None:
+        if self.display_select is not None:
+            self.display_select._sync_options_from_coordinator()  # noqa: SLF001
+        if self.source_select is not None:
+            self.source_select.sync_options(from_coordinator=True)
+
     async def _async_update_data(self) -> SpinJamData:
+        self._sync_select_entities()
         # Tracking off: idle / no metadata (avoid stale "playing").
         if not self._tracking_enabled:
             self._cancel_lyrics_task()
@@ -637,10 +696,11 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
 
         prev_active = self.data.active if self.data else None
         hold = prev_active if prev_active and prev_active.playing else None
-        live_active = select_active_source(
+        live_active = select_monitored_source(
             self._collect_snapshots(),
             priority=self.source_players,
             vinyl_entity_id=self.vinyl_player,
+            chosen_entity_id=self.selected_source_entity_id,
             sync_offset_ms=sync_offset,
             hold=hold,
         )
@@ -686,10 +746,6 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             artwork_hd = None
             artwork_source = None
             self._last_artwork_key = None
-
-        # Keep select options in sync after options reload.
-        if self.display_select is not None:
-            self.display_select._sync_options_from_coordinator()  # noqa: SLF001
 
         position_updated_at = self._position_updated_at_for_publish(active, prev_active)
 
@@ -951,11 +1007,12 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
     async def async_set_tracking(
         self, enabled: bool, *, from_cast_stop: bool = False
     ) -> None:
-        """Enable or pause source following / coordinator polling.
+        """Enable or pause source following.
 
-        Tracking off while a Cast session is active also stops Cast (master
-        linkage). Tracking on does **not** start Cast. When off, now-playing
-        clears to idle (no stale metadata).
+        Tracking is derived from Cast: ``async_start`` turns it on and
+        ``async_stop`` turns it off. There is no tracking switch. Turning
+        tracking off while Cast is active still stops Cast, so an internal
+        caller cannot leave a cast session without now-playing.
         """
         enabled = bool(enabled)
         if not enabled and self._cast_active and not from_cast_stop:
@@ -967,7 +1024,9 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         if enabled:
             self.update_interval = self._poll_interval
             self._async_watch_sources()
-            await self.async_request_refresh()
+            # Immediate refresh. async_request_refresh is debounced and can
+            # miss the on-transition if another refresh just ran.
+            await self.async_refresh()
         else:
             self.update_interval = None
             if self._unsub_state:
@@ -978,8 +1037,18 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             self._track_lyrics = None
             self.async_set_updated_data(self._idle_data(tracking_enabled=False))
             self._last_publish_fingerprint = self._data_fingerprint(self.data)
-        if self.tracking_switch is not None and self.tracking_switch.hass is not None:
-            self.tracking_switch.async_write_ha_state()
+
+    async def async_nudge_lyric_offset(self, delta_ms: int) -> None:
+        """Move the lyric delay by ``delta_ms`` and clamp to the number range.
+
+        Positive delays the lyrics. Applied live, same path as the number entity.
+        """
+        current = int(self.data.lyric_offset_ms if self.data else 0)
+        await self.async_set_lyric_offset(current + int(delta_ms))
+
+    async def async_reset_lyric_offset(self) -> None:
+        """Restore the delay captured when this config entry was loaded."""
+        await self.async_set_lyric_offset(self._lyric_offset_baseline)
 
     def _persist_live_option(self, key: str, value: int) -> None:
         """Write an offset into options without triggering a full reload."""
@@ -1315,6 +1384,8 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             ATTR_LYRIC_LINES: self.data.lyric_lines,
             ATTR_LYRICS_STATUS: self.data.lyrics_status,
             ATTR_LYRICS_SOURCE: self.data.lyrics_source,
+            ATTR_LYRICS_DURATION: self.data.lyrics_duration,
+            ATTR_LYRICS_DURATION_DELTA: self.data.lyrics_duration_delta,
             ATTR_ALBUM_LOCK: self.data.album_lock,
             ATTR_DISPLAYS: list(self.displays),
             ATTR_SELECTED_DISPLAY: self.selected_display,
@@ -1322,12 +1393,13 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             ATTR_ARTWORK_SOURCE: self.data.artwork_source,
             ATTR_ARTWORK_NEXT: self.data.artwork_next,
             ATTR_LYRICS_ENABLED: self.lyrics_enabled,
+            "selected_source": self.selected_source,
+            "active_source": active.entity_id if active else None,
             "tracking_enabled": self._tracking_enabled,
             "cast_active": self._cast_active,
             "builtin_casting": self.builtin_casting,
         }
         if active:
-            attrs["active_source"] = active.entity_id
             attrs["source_kind"] = active.kind
             if active.artist:
                 attrs["media_artist"] = active.artist
