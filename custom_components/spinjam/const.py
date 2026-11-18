@@ -12,6 +12,7 @@ CONF_DISPLAY_ENTITY = "display_entity"
 CONF_SYNC_OFFSET_MS = "sync_offset_ms"
 CONF_LYRIC_OFFSET_MS = "lyric_offset_ms"
 CONF_LYRICS_ENABLED = "lyrics_enabled"
+CONF_FALLBACK_PROVIDERS = "fallback_providers"
 CONF_UPDATE_INTERVAL = "update_interval"
 CONF_DASHBOARD_PATH = "dashboard_path"
 CONF_VIEW_PATH = "view_path"
@@ -27,6 +28,8 @@ DEFAULT_NAME = "SpinJam Now Playing"
 DEFAULT_SYNC_OFFSET_MS = 0
 DEFAULT_LYRIC_OFFSET_MS = 0
 DEFAULT_LYRICS_ENABLED = True
+# lyrics.ovh on, QQ Music off. Saved list order is the lookup order.
+DEFAULT_FALLBACK_PROVIDERS = ("lyricsovh",)
 DEFAULT_UPDATE_INTERVAL = 1.0
 DEFAULT_DASHBOARD_PATH = "spinjam-tv"
 DEFAULT_VIEW_PATH = "now"
@@ -53,6 +56,8 @@ ATTR_LYRIC_CURRENT = "lyric_current"
 ATTR_LYRIC_NEXT = "lyric_next"
 ATTR_LYRIC_LINES = "lyric_lines"
 ATTR_LYRIC_OFFSET_MS = "lyric_offset_ms"
+ATTR_LYRICS_STATUS = "lyrics_status"
+ATTR_LYRICS_SOURCE = "lyrics_source"
 ATTR_ACTIVE_SOURCE = "active_source"
 ATTR_SOURCE_KIND = "source_kind"
 ATTR_DISPLAYS = "displays"
@@ -128,7 +133,29 @@ MQTT_CMD_CLEAR = "spinjam/cmd/clear"
 MQTT_CMD_SELECT_ALBUM = "spinjam/cmd/select_album"
 
 LRCLIB_API = "https://lrclib.net/api/get"
+LRCLIB_SEARCH_API = "https://lrclib.net/api/search"
+QQMUSIC_SEARCH_API = "https://c.y.qq.com/soso/fcgi-bin/client_search_cp"
+QQMUSIC_LYRIC_API = "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg"
+LYRICSOVH_API = "https://api.lyrics.ovh/v1"
 LYRICS_CACHE_SIZE = 64
+LYRICS_REQUEST_TIMEOUT = 6.0
+LYRICS_BUDGET_SEC = 12.0
+LYRICS_NOT_FOUND_TTL_SEC = 6 * 60 * 60
+LYRICS_ERROR_RETRY_SEC = 5 * 60
+LYRICS_PROVIDER_FAIL_LIMIT = 5
+LYRICS_PROVIDER_SKIP_SEC = 60 * 60
+LYRICS_DURATION_TOLERANCE_SEC = 3.0
+
+LYRICS_PROVIDER_LRCLIB = "lrclib"
+LYRICS_PROVIDER_QQMUSIC = "qqmusic"
+LYRICS_PROVIDER_LYRICSOVH = "lyricsovh"
+
+LYRICS_STATUS_SYNCED = "synced"
+LYRICS_STATUS_PLAIN = "plain"
+LYRICS_STATUS_INSTRUMENTAL = "instrumental"
+LYRICS_STATUS_NOT_FOUND = "not_found"
+LYRICS_STATUS_ERROR = "error"
+LYRICS_STATUS_DISABLED = "disabled"
 
 SELECT_DISPLAY_ENTITY_ID = "select.spinjam_display"
 SWITCH_CAST_ENTITY_ID = "switch.spinjam_cast"

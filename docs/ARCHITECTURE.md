@@ -6,7 +6,7 @@ SpinJam is a **general now-playing system**. Vinyl is one source among Music Ass
 
 | Piece | Runs where | Role |
 | --- | --- | --- |
-| `custom_components/spinjam` | Home Assistant (HACS) | Brain: pick active source, unify metadata, LRCLIB lyrics, HD art, services, Cast |
+| `custom_components/spinjam` | Home Assistant (HACS) | Brain: pick active source, unify metadata, lyrics (LRCLIB then fallbacks), HD art, services, Cast |
 | `spinjam/` Python service | Capture Pi (Zero 2 W / Pi 4) | Vinyl audio capture + Shazam/(optional ACR/AudD) → MQTT media_player |
 | Lovelace card + Cast | HA → TV Cast targets | `spinjam-lyrics-card` (details + lyrics) + `cast.show_lovelace_view` on `spinjam.start` |
 
@@ -34,6 +34,7 @@ SpinJam is a **general now-playing system**. Vinyl is one source among Music Ass
 12. Prefer `spinjam.create_dashboard` (panel: details left, lyrics right; plus a Controls view with cast/tracking/lyrics tiles). Card JS is a Lovelace module resource at `/spinjam/spinjam-lyrics-card.js?v=<hash>` (plus the same URL via `add_extra_js_url`); `spinjam-now-playing-card` remains a deprecated alias.
 13. HD album art (option `hd_artwork`, default on): on track change, SpinJam queries the iTunes Search API and rewrites `artworkUrl100` to a large size, falls back to MusicBrainz + Cover Art Archive (`front-1200`), then `entity_picture`. Results are scored and cached (memory + small on-disk LRU). Exposed as `artwork_hd` / `artwork_source`; the card crossfades from low-res once HD loads.
 14. Prefetch (option `prefetch`, default on): when the active source exposes a next item (queue attributes or Music Assistant `get_queue`), SpinJam preloads next-track HD art and lyrics; the card preloads `artwork_next`. Degrades gracefully if MA is absent.
+15. Lyrics fallback (option `fallback_providers`, default `lyricsovh`): after LRCLIB misses, try the selected providers in order. QQ Music is an unofficial endpoint for personal use and is off by default. Hits stay in the LRU. `not_found` expires after 6 hours. Network errors, timeouts, and HTTP 5xx are not cached. The lookup runs in a background task (6 s per request, 12 s per track) and publishes `lyrics_status` / `lyrics_source` when it finishes. `switch.spinjam_lyrics` off sets `lyrics_status` to `disabled` and the card uses the cover layout.
 
 ## Memory constraints
 

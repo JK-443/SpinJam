@@ -16,6 +16,7 @@ from .const import (
     CONF_BUILTIN_CASTING,
     CONF_DASHBOARD_PATH,
     CONF_DISPLAYS,
+    CONF_FALLBACK_PROVIDERS,
     CONF_HD_ARTWORK,
     CONF_LYRIC_OFFSET_MS,
     CONF_LYRICS_ENABLED,
@@ -30,6 +31,7 @@ from .const import (
     CONF_VINYL_PLAYER,
     DEFAULT_BUILTIN_CASTING,
     DEFAULT_DASHBOARD_PATH,
+    DEFAULT_FALLBACK_PROVIDERS,
     DEFAULT_HD_ARTWORK,
     DEFAULT_LYRIC_OFFSET_MS,
     DEFAULT_LYRICS_ENABLED,
@@ -44,6 +46,7 @@ from .const import (
     DOMAIN,
 )
 from .dashboard import validate_dashboard_url_path
+from .lyrics import normalize_fallback_providers
 
 
 def entity_selector_supports_reorder() -> bool:
@@ -143,6 +146,34 @@ def _add_optional_single_media_player(
         fields[vol.Optional(key)] = entity_selector
 
 
+def _fallback_default(defaults: dict[str, Any]) -> list[str]:
+    if CONF_FALLBACK_PROVIDERS in defaults:
+        return normalize_fallback_providers(defaults.get(CONF_FALLBACK_PROVIDERS))
+    return list(DEFAULT_FALLBACK_PROVIDERS)
+
+
+def _fallback_providers_selector() -> selector.SelectSelector:
+    """Ordered multi-select. QQ Music stays off unless the user adds it."""
+    options = [
+        {"value": "qqmusic", "label": "QQ Music"},
+        {"value": "lyricsovh", "label": "lyrics.ovh"},
+    ]
+    config: dict[str, Any] = {
+        "options": options,
+        "multiple": True,
+        "custom_value": False,
+    }
+    mode = getattr(selector, "SelectSelectorMode", None)
+    if mode is not None and hasattr(mode, "LIST"):
+        try:
+            return selector.SelectSelector(
+                selector.SelectSelectorConfig(mode=mode.LIST, **config)
+            )
+        except vol.Invalid:
+            pass
+    return selector.SelectSelector(selector.SelectSelectorConfig(**config))
+
+
 def _schema(defaults: dict[str, Any] | None = None, *, options: bool = False) -> vol.Schema:
     """Build a config/options schema using only HA-serializable selectors / types.
 
@@ -178,6 +209,10 @@ def _schema(defaults: dict[str, Any] | None = None, *, options: bool = False) ->
         fields, CONF_VINYL_PLAYER, defaults.get(CONF_VINYL_PLAYER)
     )
     if options:
+        fields[vol.Required(
+            CONF_FALLBACK_PROVIDERS,
+            default=_fallback_default(defaults),
+        )] = _fallback_providers_selector()
         fields[vol.Required(
             CONF_BUILTIN_CASTING,
             default=defaults.get(CONF_BUILTIN_CASTING, DEFAULT_BUILTIN_CASTING),
@@ -261,6 +296,10 @@ def _validate_flow_input(
         user_input[CONF_LYRIC_OFFSET_MS] = lyric
 
     if options:
+        if CONF_FALLBACK_PROVIDERS in user_input:
+            user_input[CONF_FALLBACK_PROVIDERS] = normalize_fallback_providers(
+                user_input.get(CONF_FALLBACK_PROVIDERS)
+            )
         try:
             user_input[CONF_DASHBOARD_PATH] = validate_dashboard_url_path(
                 user_input.get(CONF_DASHBOARD_PATH)

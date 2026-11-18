@@ -15,6 +15,8 @@
  *    ignored entirely, so nothing is applied twice.
  *  - Otherwise the card falls back to SpinJam's lyric_offset_ms with the same
  *    convention (positive = later → subtract from position).
+ * Plain lyrics (lyrics_status=plain) are static centred text with no sweep.
+ * A dim "Lyrics: …" footer sits at the bottom right in lyrics mode.
  */
 import { PlaybackClock } from "./spinjam-playback-clock.js";
 
@@ -31,6 +33,7 @@ class SpinJamLyricsCard extends HTMLElement {
     this._onResize = () => { this._fitHeight(); this._scroll(false); };
     this._pbClock = new PlaybackClock();
     this._lastLineIdx = -2;
+    this._plain = false;
   }
 
   static getStubConfig() {
@@ -210,10 +213,19 @@ class SpinJamLyricsCard extends HTMLElement {
                    transform: scaleX(0); will-change: transform; }
         .dbg { font-size: 14px; opacity: .5; margin-top: 6px; }
         .msg { text-align: center; font-size: var(--sj-fs, 31px); opacity: .6; margin: auto 0; }
+        .msg.plain {
+          white-space: pre-wrap; font-weight: 600; opacity: .9; overflow: auto;
+          max-height: 70%; line-height: 1.35;
+        }
+        .attrib {
+          position: absolute; right: 14px; bottom: 8px; z-index: 3;
+          font-size: 12px; line-height: 1.2; opacity: .38; letter-spacing: .02em;
+          pointer-events: none;
+        }
         /* details mode */
         .det { position: absolute; inset: 0; display: none; }
         :host([mode="details"]) .det { display: block; }
-        :host([mode="details"]) .head, :host([mode="details"]) .vp, :host([mode="details"]) .msg { display: none !important; }
+        :host([mode="details"]) .head, :host([mode="details"]) .vp, :host([mode="details"]) .msg, :host([mode="details"]) .attrib { display: none !important; }
         :host([mode="details"]) ha-card { padding: 0; }
         .art { position: absolute; inset: 0; background: #000 center / cover no-repeat; }
         .shade { position: absolute; left: 0; right: 0; bottom: 0; height: 55%;
@@ -239,6 +251,7 @@ class SpinJamLyricsCard extends HTMLElement {
         :host([mode="cover"]) .head,
         :host([mode="cover"]) .vp,
         :host([mode="cover"]) .msg,
+        :host([mode="cover"]) .attrib,
         :host([mode="cover"]) .det { display: none !important; }
         :host([mode="cover"]) ha-card { padding: 0; }
         .cover-blur {
@@ -290,10 +303,12 @@ class SpinJamLyricsCard extends HTMLElement {
           <div class="dbg hidden"></div></div>
         <div class="msg hidden"></div>
         <div class="vp"><ul></ul></div>
+        <div class="attrib"></div>
       </ha-card>`;
     this._titleEl = this._root.querySelector(".title");
     this._subEl = this._root.querySelector(".sub");
     this._msgEl = this._root.querySelector(".msg");
+    this._attrib = this._root.querySelector(".attrib");
     this._vp = this._root.querySelector(".vp");
     this._ul = this._root.querySelector("ul");
     this._card = this._root.querySelector("ha-card");
@@ -509,8 +524,9 @@ class SpinJamLyricsCard extends HTMLElement {
     if (a.artwork_next) this._preload(this._absUrl(a.artwork_next));
 
     const raw = Array.isArray(a.lyric_lines) ? a.lyric_lines.filter((l) => l && l.text != null) : [];
+    const status = String(a.lyrics_status || "");
     const key = active
-      ? [a.media_title, a.media_artist, raw.length, raw[0] && raw[0].t, raw[0] && raw[0].text, lyricsOn].join("|")
+      ? [a.media_title, a.media_artist, status, a.lyrics_source, raw.length, raw[0] && raw[0].t, raw[0] && raw[0].text, lyricsOn].join("|")
       : "idle";
     if (key !== this._songKey) {
       this._songKey = key;
@@ -539,20 +555,49 @@ class SpinJamLyricsCard extends HTMLElement {
     }
     const wantProg = details || cover || this._cfg.show_progress;
     this._prog.classList.toggle("hidden", !(wantProg && active && Number(a.media_duration) > 0));
+    this._setAttrib(a);
     if (details || cover) { this._progress(); return; }
     this._dbg.classList.toggle("hidden", !this._cfg.debug);
     this._progress();
-    if (!active || !this._lines.length) {
-      this._vp.classList.toggle("hidden", true);
+    this._plain = status === "plain";
+    if (this._plain && this._lines.length) {
+      this._vp.classList.add("hidden");
       this._msgEl.classList.remove("hidden");
-      this._msgEl.textContent = !active
-        ? "Waiting for music…"
-        : a.lyric_current || "No lyrics";
+      this._msgEl.classList.add("plain");
+      this._msgEl.textContent = this._lines.map((l) => l.text).join("\n");
+      return;
+    }
+    this._msgEl.classList.remove("plain");
+    if (!active || !this._lines.length) {
+      this._vp.classList.add("hidden");
+      this._msgEl.classList.remove("hidden");
+      this._msgEl.textContent = this._emptyLyricsText(active, status, a);
+      if (!this._msgEl.textContent) this._msgEl.classList.add("hidden");
       return;
     }
     this._vp.classList.remove("hidden");
     this._msgEl.classList.add("hidden");
     this._tick(true);
+  }
+
+  _emptyLyricsText(active, status, a) {
+    if (!active) return "Waiting for music…";
+    if (status === "not_found") return "Lyrics not available for this song";
+    if (status === "instrumental") return "Instrumental";
+    if (status === "error" || status === "disabled" || !status) return a.lyric_current || "";
+    return a.lyric_current || "No lyrics";
+  }
+
+  _setAttrib(a) {
+    if (!this._attrib) return;
+    const src = String((a && a.lyrics_source) || "");
+    const label = src === "lrclib" ? "Lyrics: LRCLIB"
+      : src === "qqmusic" ? "Lyrics: QQ Music"
+      : src === "lyricsovh" ? "Lyrics: lyrics.ovh"
+      : "";
+    if (this._attrib.textContent !== label) this._attrib.textContent = label;
+    const mode = this.getAttribute("mode");
+    this._attrib.classList.toggle("hidden", !label || mode === "details" || mode === "cover");
   }
 
   _renderList() {
@@ -693,7 +738,7 @@ class SpinJamLyricsCard extends HTMLElement {
     if (st && st.state === "playing" && this.isConnected) {
       this._progress();
       const mode = this.getAttribute("mode");
-      if (this._lines.length && mode !== "details" && mode !== "cover") this._tick(false);
+      if (this._lines.length && !this._plain && mode !== "details" && mode !== "cover") this._tick(false);
     }
     this._startLoop();
   }
