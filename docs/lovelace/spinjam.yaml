@@ -2,7 +2,7 @@
 # Preferred path: spinjam-tv (HA requires a hyphen in dashboard url_path).
 # Or call service: spinjam.create_dashboard
 #
-# Layout: details (art/meta/progress) left, karaoke lyrics right.
+# Layout: one full-screen card. Lyrics on splits art and lyrics; lyrics off is the stage.
 #
 # Cast service (called by spinjam.start when built-in casting is on):
 #   service: cast.show_lovelace_view
@@ -16,17 +16,12 @@ views:
   - title: Now
     path: now
     type: panel
+    panel: true
     cards:
-      - type: horizontal-stack
-        cards:
-          - type: custom:spinjam-lyrics-card
-            entity: media_player.spinjam_now_playing
-            mode: details
-            offset_entity: number.spinjam_lyric_offset
-          - type: custom:spinjam-lyrics-card
-            entity: media_player.spinjam_now_playing
-            mode: lyrics
-            offset_entity: number.spinjam_lyric_offset
+      - type: custom:spinjam-lyrics-card
+        entity: media_player.spinjam_now_playing
+        mode: cast
+        offset_entity: number.spinjam_lyric_offset
   - title: Controls
     path: controls
     type: masonry

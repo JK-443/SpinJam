@@ -35,13 +35,14 @@ service: spinjam.create_dashboard
 #   view_path: now
 ```
 
-This creates a storage-mode **panel** dashboard with a horizontal stack:
-**details** (art / title / artist / album / progress) on the left and **lyrics**
-(centred, fading, karaoke sweep) on the right, plus a Controls view (Cast,
-Display, Source, Lyrics). Running it again upgrades that dashboard in place:
-missing control tiles are added, the old tracking tile is removed, and cards
-you added are not rewritten or duplicated. Setup does the same upgrade when
-the dashboard already exists.
+This creates a storage-mode **panel** view (`panel: true`) with **one** card
+(`mode: cast`). Lyrics on is the split art/lyrics layout inside that card;
+lyrics off is the full-bleed stage. A Controls view (Cast, Display, Source,
+Lyrics) is included. Running it again, or setting up when the dashboard
+already exists, upgrades a generated two-card Cast view to that single card
+and updates the Controls tiles. Cards you added are left in place. The change
+is logged. A new card hash makes the next cast quit and relaunch so the
+receiver loads it.
 
 **Manual UI:**
 
@@ -51,18 +52,15 @@ the dashboard already exists.
    - Title: `Now`
    - Path: `now` (must match options `view_path`)
    - Type: **Panel**
-4. Add a horizontal-stack with two cards:
+4. Add one card that fills the panel:
 
 ```yaml
-type: horizontal-stack
+type: panel
+panel: true
 cards:
   - type: custom:spinjam-lyrics-card
     entity: media_player.spinjam_now_playing
-    mode: details
-    offset_entity: number.spinjam_lyric_offset
-  - type: custom:spinjam-lyrics-card
-    entity: media_player.spinjam_now_playing
-    mode: lyrics
+    mode: cast
     offset_entity: number.spinjam_lyric_offset
 ```
 

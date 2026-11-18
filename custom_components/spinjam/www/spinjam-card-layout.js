@@ -8,6 +8,7 @@
 
 export const CARD_MODE_LYRICS = "lyrics";
 export const CARD_MODE_DETAILS = "details";
+export const CARD_MODE_CAST = "cast";
 export const CARD_MODE_STAGE = "stage";
 export const CARD_MODE_HIDDEN = "hidden";
 
@@ -28,11 +29,22 @@ export function resolveCardPresentation({
 } = {}) {
   const lyricsOn = lyricsEnabled !== false;
   const details = configuredMode === "details";
+  const cast = configuredMode === "cast";
+  // One card owns both layouts and fills the panel. No sibling column to collapse.
+  if (cast) {
+    return {
+      mode: lyricsOn ? CARD_MODE_CAST : CARD_MODE_STAGE,
+      collapseSlot: false,
+      expandSlot: false,
+      fullBleed: true,
+    };
+  }
   if (lyricsOn) {
     return {
       mode: details ? CARD_MODE_DETAILS : CARD_MODE_LYRICS,
       collapseSlot: false,
       expandSlot: false,
+      fullBleed: false,
     };
   }
   if (!details && siblingShowsStage) {
@@ -40,13 +52,59 @@ export function resolveCardPresentation({
       mode: CARD_MODE_HIDDEN,
       collapseSlot: true,
       expandSlot: false,
+      fullBleed: false,
     };
   }
   return {
     mode: CARD_MODE_STAGE,
     collapseSlot: false,
     expandSlot: true,
+    fullBleed: true,
   };
+}
+
+/**
+ * How a card slot should size when a custom layout still has two cards.
+ * A grid keeps an empty track unless the template itself collapses.
+ */
+export function slotLayoutPatch(presentation, parentDisplay) {
+  const empty = {
+    hostDisplay: "",
+    slotDisplay: "",
+    slotFlex: "",
+    slotWidth: "",
+    slotMaxWidth: "",
+    slotMargin: "",
+    slotPadding: "",
+    slotOverflow: "",
+    slotGridColumn: "",
+    parentGridTemplateColumns: "",
+  };
+  if (!presentation) return empty;
+  if (presentation.collapseSlot) {
+    return {
+      hostDisplay: "none",
+      slotDisplay: "none",
+      slotFlex: "0 0 0px",
+      slotWidth: "0px",
+      slotMaxWidth: "0px",
+      slotMargin: "0px",
+      slotPadding: "0px",
+      slotOverflow: "hidden",
+      slotGridColumn: "",
+      parentGridTemplateColumns: parentDisplay === "grid" || parentDisplay === "inline-grid" ? "1fr" : "",
+    };
+  }
+  if (presentation.expandSlot) {
+    return {
+      ...empty,
+      slotFlex: "1 1 100%",
+      slotWidth: "100%",
+      slotMaxWidth: "100%",
+      slotGridColumn: "1 / -1",
+    };
+  }
+  return empty;
 }
 
 /** True when the stage should show the neutral gradient and a placeholder cover. */

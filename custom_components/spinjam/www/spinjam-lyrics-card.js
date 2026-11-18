@@ -25,6 +25,7 @@
 import { PlaybackClock, lyricLookPosition } from "./spinjam-playback-clock.js";
 import {
   resolveCardPresentation,
+  slotLayoutPatch,
   stageArtSizePx,
   stageMissingArt,
   LAYOUT_TRANSITION_MS,
@@ -144,10 +145,37 @@ class SpinJamLyricsCard extends HTMLElement {
   _fitHeight() {
     if (!this._card) return;
     if (this._cfg && this._cfg.height) { this._card.style.height = this._cfg.height; return; }
+    if (this._presentation && this._presentation.fullBleed) {
+      this._card.style.height = "100vh";
+      this._card.style.width = "100%";
+      this._clearChrome();
+      this._scale();
+      return;
+    }
     const top = this.getBoundingClientRect().top;
     const h = Math.max(320, Math.round(window.innerHeight - Math.max(0, top) - 8));
     this._card.style.height = h + "px";
     this._scale();
+  }
+
+  /* Panel / stage cards sit flush: no Lovelace card margin, padding, or shadow. */
+  _clearChrome() {
+    this.style.width = "100vw";
+    this.style.height = "100vh";
+    this.style.margin = "0";
+    this.style.padding = "0";
+    let node = this.parentElement;
+    for (let i = 0; i < 5 && node; i += 1) {
+      node.style.margin = "0";
+      node.style.padding = "0";
+      node.style.border = "none";
+      node.style.boxShadow = "none";
+      node.style.borderRadius = "0";
+      node.style.maxWidth = "none";
+      node.style.width = "100%";
+      node.style.height = "100%";
+      node = node.parentElement;
+    }
   }
 
   /*
@@ -243,8 +271,12 @@ class SpinJamLyricsCard extends HTMLElement {
           opacity: 0; visibility: hidden; pointer-events: none;
         }
         :host([mode="details"]) .det { opacity: 1; visibility: visible; pointer-events: auto; }
-        :host([mode="details"]) .head, :host([mode="details"]) .vp, :host([mode="details"]) .msg, :host([mode="details"]) .attrib { display: none !important; }
+        :host([mode="details"]) .lyrics-pane, :host([mode="details"]) .attrib { display: none !important; }
         :host([mode="details"]) ha-card { padding: 0; }
+        .lyrics-pane {
+          display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0;
+          height: 100%; position: relative;
+        }
         .art { position: absolute; inset: 0; background: #000 center / cover no-repeat; }
         .shade { position: absolute; left: 0; right: 0; bottom: 0; height: 55%;
                  background: linear-gradient(to bottom, transparent, rgba(0,0,0,.55) 35%, rgba(0,0,0,.88)); }
@@ -271,12 +303,29 @@ class SpinJamLyricsCard extends HTMLElement {
           opacity: 0; visibility: hidden; pointer-events: none;
         }
         :host([mode="stage"]) .stage { opacity: 1; visibility: visible; pointer-events: auto; }
-        :host([mode="stage"]) .head,
-        :host([mode="stage"]) .vp,
-        :host([mode="stage"]) .msg,
+        :host([mode="stage"]) .lyrics-pane,
         :host([mode="stage"]) .attrib { display: none !important; }
-        :host([mode="stage"]) ha-card { padding: 0; background: transparent; }
-        :host([mode="hidden"]) { opacity: 0; pointer-events: none; }
+        :host([mode="stage"]) ha-card,
+        :host([mode="cast"]) ha-card {
+          margin: 0; padding: 0; border: none; box-shadow: none; border-radius: 0;
+          --ha-card-border-width: 0px; --ha-card-border-radius: 0px; --ha-card-box-shadow: none;
+        }
+        :host([mode="stage"]) ha-card { background: transparent; }
+        :host([mode="cast"]),
+        :host([mode="stage"]) {
+          display: block; width: 100vw; height: 100vh; margin: 0; padding: 0;
+        }
+        /* cast: one card, lyrics on = details | lyrics, filling the panel */
+        :host([mode="cast"]) ha-card {
+          display: flex; flex-direction: row; background: #121212; width: 100%; height: 100%;
+        }
+        :host([mode="cast"]) .det {
+          position: relative; inset: auto; flex: 1 1 50%; width: 50%; height: 100%;
+          min-width: 0; opacity: 1; visibility: visible; pointer-events: auto;
+        }
+        :host([mode="cast"]) .lyrics-pane { flex: 1 1 50%; width: 50%; height: 100%; }
+        :host([mode="cast"]) .stage { opacity: 0; visibility: hidden; pointer-events: none; }
+        :host([mode="hidden"]) { display: none !important; }
         :host([mode="hidden"]) ha-card { visibility: hidden; }
         .stage-bg { position: absolute; inset: 0; overflow: hidden; background: #16161a; }
         .stage-bg.empty {
@@ -370,11 +419,13 @@ class SpinJamLyricsCard extends HTMLElement {
             <div class="prog sprog"><span class="tl">0:00</span><div class="bar"><div class="fillbar"></div></div><span class="tr">0:00</span></div>
           </div>
         </div>
-        <div class="head"><div class="title"></div><div class="sub"></div>
-          <div class="prog"><span class="tl">0:00</span><div class="bar"><div class="fillbar"></div></div><span class="tr">0:00</span></div>
-          <div class="dbg hidden"></div></div>
-        <div class="msg hidden"></div>
-        <div class="vp"><ul></ul></div>
+        <div class="lyrics-pane">
+          <div class="head"><div class="title"></div><div class="sub"></div>
+            <div class="prog"><span class="tl">0:00</span><div class="bar"><div class="fillbar"></div></div><span class="tr">0:00</span></div>
+            <div class="dbg hidden"></div></div>
+          <div class="msg hidden"></div>
+          <div class="vp"><ul></ul></div>
+        </div>
         <div class="attrib"></div>
         <div class="toast" role="status"></div>
       </ha-card>`;
@@ -431,7 +482,7 @@ class SpinJamLyricsCard extends HTMLElement {
     }
     const mode = presentation.mode;
     let pr;
-    if (mode === "details") pr = this._root.querySelector(".dprog");
+    if (mode === "details" || mode === "cast") pr = this._root.querySelector(".dprog");
     else if (mode === "stage" || mode === "hidden") pr = this._root.querySelector(".sprog");
     else pr = this._root.querySelector(".head .prog");
     this._prog = pr;
@@ -440,57 +491,61 @@ class SpinJamLyricsCard extends HTMLElement {
     this._tr = pr ? pr.querySelector(".tr") : null;
   }
 
-  /* Flex child of a horizontal stack (#root), if this card is in one. */
+  /* Direct child of the nearest flex row or grid (horizontal-stack, sections, grid). */
   _stackSlot() {
     let node = this;
-    let fallback = null;
     for (let i = 0; i < 8 && node && node.parentElement; i += 1) {
       const parent = node.parentElement;
-      let flex = false;
+      let display = "";
       try {
-        flex = getComputedStyle(parent).display === "flex";
+        display = getComputedStyle(parent).display;
       } catch (err) {
-        flex = false;
+        display = "";
       }
-      if (flex && fallback === null) fallback = node;
-      if (flex && (parent.id === "root" || (parent.classList && parent.classList.contains("horizontal")))) {
-        return node;
-      }
+      const row = parent.id === "root" || (parent.classList && parent.classList.contains("horizontal"));
+      const grid = display === "grid" || display === "inline-grid";
+      const flex = display === "flex" || display === "inline-flex";
+      if (row || grid || flex) return node;
       node = parent;
     }
-    return fallback;
+    return null;
   }
 
   _applyStackSlot(presentation) {
     const slot = this._stackSlot();
-    if (!slot || !presentation) return;
+    const parent = slot && slot.parentElement;
+    let parentDisplay = "";
+    try {
+      parentDisplay = parent ? getComputedStyle(parent).display : "";
+    } catch (err) {
+      parentDisplay = "";
+    }
+    const patch = slotLayoutPatch(presentation, parentDisplay);
+    this.style.display = patch.hostDisplay;
+    if (!slot) return;
     if (!slot.dataset.sjSlot) {
       slot.dataset.sjSlot = "1";
       slot.style.transition = `flex-basis ${LAYOUT_TRANSITION_MS}ms ease, max-width ${LAYOUT_TRANSITION_MS}ms ease, opacity ${LAYOUT_TRANSITION_MS}ms ease, padding ${LAYOUT_TRANSITION_MS}ms ease`;
       slot.style.minWidth = "0";
     }
-    if (presentation.collapseSlot) {
-      slot.style.flex = "0 1 0px";
-      slot.style.maxWidth = "0px";
-      slot.style.padding = "0px";
-      slot.style.margin = "0px";
-      slot.style.opacity = "0";
-      slot.style.overflow = "hidden";
-      return;
+    slot.style.display = patch.slotDisplay;
+    slot.style.flex = patch.slotFlex;
+    slot.style.width = patch.slotWidth;
+    slot.style.maxWidth = patch.slotMaxWidth;
+    slot.style.margin = patch.slotMargin;
+    slot.style.padding = patch.slotPadding;
+    slot.style.overflow = patch.slotOverflow;
+    slot.style.gridColumn = patch.slotGridColumn;
+    if (!parent) return;
+    if (patch.parentGridTemplateColumns) {
+      if (parent.dataset.sjGrid === undefined) {
+        parent.dataset.sjGrid = parent.style.gridTemplateColumns || "";
+      }
+      parent.style.gridTemplateColumns = patch.parentGridTemplateColumns;
+    } else if (parent.dataset.sjGrid !== undefined && !(presentation && presentation.collapseSlot)) {
+      parent.style.gridTemplateColumns = parent.dataset.sjGrid;
+      delete parent.dataset.sjGrid;
     }
-    slot.style.margin = "";
-    slot.style.overflow = "";
-    if (presentation.expandSlot) {
-      slot.style.flex = "1 1 auto";
-      slot.style.maxWidth = "100%";
-      slot.style.opacity = "1";
-      slot.style.padding = "";
-      return;
-    }
-    slot.style.flex = "";
-    slot.style.maxWidth = "";
-    slot.style.opacity = "";
-    slot.style.padding = "";
   }
 
   _siblingShowsStage() {
@@ -708,7 +763,7 @@ class SpinJamLyricsCard extends HTMLElement {
     const mode = this.getAttribute("mode");
     if (mode === "hidden") return false;
     if (this._cfg && this._cfg.mode === "lyrics") return mode === "stage";
-    return true;
+    return mode === "cast" || mode === "stage" || mode === "details" || mode === "lyrics";
   }
 
   _noteOffsetToast() {
@@ -775,34 +830,37 @@ class SpinJamLyricsCard extends HTMLElement {
 
     const mode = this.getAttribute("mode");
     const details = mode === "details";
+    const cast = mode === "cast";
     const stage = mode === "stage";
     if (mode === "hidden") {
       if (this._prog) this._prog.classList.add("hidden");
       return;
     }
-    if (details) {
+    if (details || cast) {
       this._dt.textContent = active ? a.media_title || "" : "SpinJam";
       this._da.textContent = active ? a.media_artist || "" : "Waiting for music…";
       this._dl.textContent = active ? a.media_album_name || "" : "";
       this._setArtLayers(lo, hd);
-    } else if (stage) {
+    }
+    if (stage) {
       this._stageTitle.textContent = active ? a.media_title || "SpinJam" : "SpinJam";
       this._stageArtist.textContent = active
         ? (a.media_artist || "")
         : "Waiting for music…";
       this._stageAlbum.textContent = active ? a.media_album_name || "" : "";
       this._setStageArt(lo, hd);
-    } else {
+    }
+    if (!details && !stage) {
       this._head.classList.toggle("hidden", !(this._cfg.show_header || this._cfg.show_progress));
       this._titleEl.classList.toggle("hidden", !this._cfg.show_header);
       this._subEl.classList.toggle("hidden", !this._cfg.show_header);
     }
-    const wantProg = details || stage || this._cfg.show_progress;
+    const wantProg = details || cast || stage || this._cfg.show_progress;
     if (this._prog) {
       this._prog.classList.toggle("hidden", !(wantProg && active && Number(a.media_duration) > 0));
     }
     this._setAttrib(a);
-    if (details || stage) { this._progress(); return; }
+    if ((details || stage) && !cast) { this._progress(); return; }
     this._dbg.classList.toggle("hidden", !this._cfg.debug);
     this._progress();
     this._plain = status === "plain";
@@ -1012,7 +1070,7 @@ if (!customElements.get("spinjam-lyrics-card")) {
   window.customCards.push({
     type: "spinjam-lyrics-card",
     name: "SpinJam Lyrics",
-    description: "Centered lyrics and HD art. Lyrics off switches live to one full-width stage (modes: lyrics | details | stage)",
+    description: "One Cast card: split lyrics when on, full-screen stage when off (modes: cast | lyrics | details)",
   });
 }
 
