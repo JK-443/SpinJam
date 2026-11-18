@@ -51,7 +51,13 @@ def test_user_schema_serializes_with_defaults() -> None:
 
 
 def test_options_schema_serializes_with_defaults() -> None:
-    _assert_serializable(_schema(options=True))
+    converted = voluptuous_serialize.convert(
+        _schema(options=True), custom_serializer=cv.custom_serializer
+    )
+    assert isinstance(converted, list)
+    assert converted
+    fallback = next(item for item in converted if item.get("name") == "fallback_providers")
+    assert fallback.get("default") == ["lyricsovh"]
 
 
 def test_options_schema_serializes_with_existing_entry_defaults() -> None:

@@ -31,13 +31,14 @@
     "step": {
       "init": {
         "title": "SpinJam options",
-        "description": "Update sources, displays, lyric timing, and Cast options. Defaults: dashboard_path=spinjam-tv, view_path=now. Prefer Google Cast media_players. Call spinjam.create_dashboard once or create the dashboard manually (see docs/TV_CAST.md).",
+        "description": "Update sources, displays, lyric timing, and Cast options. Defaults: dashboard_path=spinjam-tv, view_path=now. Prefer Google Cast media_players. Call spinjam.create_dashboard once or create the dashboard manually (see docs/TV_CAST.md). Fallback lyrics providers run in list order after LRCLIB. QQ Music is an unofficial endpoint, for personal use.",
         "data": {
           "name": "Name",
           "source_players": "Source media players",
           "displays": "Cast display media players (optional)",
           "vinyl_player": "Vinyl MQTT media player",
           "lyrics_enabled": "Fetch LRCLIB synced lyrics",
+          "fallback_providers": "Fallback lyrics providers",
           "sync_offset_ms": "Playback sync offset (ms)",
           "lyric_offset_ms": "Lyric display offset (ms; positive = lyrics later)",
           "builtin_casting": "Built-in casting (cast.show_lovelace_view)",
@@ -49,6 +50,9 @@
           "power_off_display_on_stop": "Power off display when stopping (default off; Cast quit leaves TV on)",
           "hd_artwork": "High-resolution album art (iTunes / Cover Art Archive)",
           "prefetch": "Prefetch next-track art and lyrics when the queue exposes them"
+        },
+        "data_description": {
+          "fallback_providers": "Tried in order after LRCLIB misses. QQ Music is an unofficial endpoint, for personal use. lyrics.ovh returns unsynced text."
         }
       }
     },

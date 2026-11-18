@@ -40,6 +40,8 @@ from .const import (
     ATTR_LYRIC_NEXT,
     ATTR_LYRIC_OFFSET_MS,
     ATTR_LYRICS_ENABLED,
+    ATTR_LYRICS_SOURCE,
+    ATTR_LYRICS_STATUS,
     ATTR_SELECTED_DISPLAY,
     ATTR_SYNC_OFFSET_MS,
     CAST_LAUNCH_GRACE_SEC,
@@ -47,6 +49,7 @@ from .const import (
     CONF_DASHBOARD_PATH,
     CONF_DISPLAY_ENTITY,
     CONF_DISPLAYS,
+    CONF_FALLBACK_PROVIDERS,
     CONF_HD_ARTWORK,
     CONF_LYRIC_OFFSET_MS,
     CONF_LYRICS_ENABLED,
@@ -60,6 +63,7 @@ from .const import (
     CONF_VIEW_PATH,
     CONF_VINYL_PLAYER,
     DEFAULT_BUILTIN_CASTING,
+    DEFAULT_FALLBACK_PROVIDERS,
     DEFAULT_HD_ARTWORK,
     DEFAULT_LYRIC_OFFSET_MS,
     DEFAULT_LYRICS_ENABLED,
@@ -71,13 +75,30 @@ from .const import (
     EVENT_SPINJAM_START,
     EVENT_SPINJAM_STOP,
     LOVELACE_APP_NAMES,
+    LYRICS_ERROR_RETRY_SEC,
+    LYRICS_STATUS_DISABLED,
+    LYRICS_STATUS_ERROR,
+    LYRICS_STATUS_INSTRUMENTAL,
+    LYRICS_STATUS_PLAIN,
+    LYRICS_STATUS_SYNCED,
+    LYRIC_LINES_ATTR_MAX,
+    LYRIC_LINES_WINDOW_BEFORE,
     MQTT_CMD_CLEAR,
     MQTT_CMD_IDENTIFY,
     MQTT_CMD_SELECT_ALBUM,
     MQTT_CMD_SYNC_OFFSET,
 )
 from .frontend import card_file_hash
-from .lyrics import LrcLibClient, LyricsResult, line_at, lines_payload
+from .lyrics import (
+    LrcLibClient,
+    LyricsCache,
+    LyricsLookup,
+    LyricsResult,
+    line_at,
+    lines_payload,
+    lyrics_kind,
+    normalize_fallback_providers,
+)
 from .next_track import async_resolve_next_track
 from .source import ActiveSource, select_active_source, snapshot_from_state
 
@@ -89,6 +110,26 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 
+def _coerce_lookup(outcome: Any) -> tuple[str, LyricsResult | None, str | None]:
+    """Accept LyricsLookup plus the legacy LyricsResult | None mock shape."""
+    if isinstance(outcome, LyricsLookup):
+        return outcome.status, outcome.result, outcome.source
+    if isinstance(outcome, LyricsResult):
+        return lyrics_kind(outcome), outcome, outcome.source
+    return "not_found", None, None
+
+
+@dataclass
+class _TrackLyrics:
+    """In-flight or settled lookup for one track signature."""
+
+    key: str
+    status: str | None
+    result: LyricsResult | None
+    source: str | None
+    error_at: float | None = None
+
+
 @dataclass
 class SpinJamData:
     active: ActiveSource | None = None
@@ -96,6 +137,8 @@ class SpinJamData:
     lyric_next: str | None = None
     lyric_lines: list[dict[str, Any]] | None = None
     lyrics: LyricsResult | None = None
+    lyrics_status: str | None = None
+    lyrics_source: str | None = None
     album_lock: str | None = None
     sync_offset_ms: int = 0
     lyric_offset_ms: int = 0
@@ -133,10 +176,12 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             lyrics_enabled=True,
         )
         self._lyrics_client: LrcLibClient | None = None
+        self._track_lyrics: _TrackLyrics | None = None
+        self._lyrics_task: asyncio.Task[Any] | None = None
+        self._lyrics_task_key: str | None = None
         self._artwork: ArtworkResolver | None = None
         self._unsub_state: Any = None
         self._tracked: list[str] = []
-        self._last_lyrics_key: str | None = None
         self._last_artwork_key: str | None = None
         self.display_select: SpinJamDisplaySelect | None = None
         self.selected_display: str | None = None
@@ -168,6 +213,176 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         if self._lyrics_client is None:
             self._lyrics_client = LrcLibClient(async_get_clientsession(self.hass))
         return self._lyrics_client
+
+    def _cancel_lyrics_task(self) -> None:
+        task = self._lyrics_task
+        self._lyrics_task = None
+        self._lyrics_task_key = None
+        if task is not None and not task.done():
+            task.cancel()
+
+    def _fallback_providers(self) -> list[str]:
+        raw = self._options().get(CONF_FALLBACK_PROVIDERS, DEFAULT_FALLBACK_PROVIDERS)
+        return normalize_fallback_providers(raw)
+
+    def _schedule_lyrics(self, key: str, active: ActiveSource) -> None:
+        """Start at most one lookup for this track. The coordinator does not await it."""
+        if (
+            self._lyrics_task is not None
+            and not self._lyrics_task.done()
+            and self._lyrics_task_key == key
+        ):
+            return
+        self._cancel_lyrics_task()
+        providers = self._fallback_providers()
+        self._lyrics_task_key = key
+        self._lyrics_task = self.hass.async_create_task(
+            self._run_lyrics(
+                key,
+                active.artist or "",
+                active.title or "",
+                active.album,
+                active.duration,
+                providers,
+            )
+        )
+
+    def _sync_lyrics_state(self, active: ActiveSource | None) -> None:
+        if not self.lyrics_enabled or active is None or not active.artist or not active.title:
+            self._cancel_lyrics_task()
+            if not self.lyrics_enabled:
+                self._track_lyrics = _TrackLyrics(
+                    key="",
+                    status=LYRICS_STATUS_DISABLED,
+                    result=None,
+                    source=None,
+                )
+            else:
+                self._track_lyrics = None
+            return
+
+        key = LyricsCache.key(active.artist, active.title, active.album, active.duration)
+        current = self._track_lyrics
+        if current is not None and current.key == key:
+            if current.status == LYRICS_STATUS_ERROR:
+                erred_at = current.error_at or 0.0
+                if time.monotonic() - erred_at >= LYRICS_ERROR_RETRY_SEC:
+                    self._schedule_lyrics(key, active)
+                return
+            if current.status is None and (
+                self._lyrics_task is None or self._lyrics_task.done()
+            ):
+                self._schedule_lyrics(key, active)
+            return
+
+        self._track_lyrics = _TrackLyrics(key=key, status=None, result=None, source=None)
+        self._schedule_lyrics(key, active)
+
+    def _lyric_fields(
+        self, active: ActiveSource | None, lyric_offset: int
+    ) -> dict[str, Any]:
+        """Lyric attributes for publish. Position comes from the live source."""
+        empty: dict[str, Any] = {
+            "lyric_current": None,
+            "lyric_next": None,
+            "lyric_lines": None,
+            "lyrics": None,
+            "lyrics_status": None,
+            "lyrics_source": None,
+        }
+        if not self.lyrics_enabled:
+            empty["lyrics_status"] = LYRICS_STATUS_DISABLED
+            return empty
+        if active is None or not active.artist or not active.title:
+            return empty
+
+        state = self._track_lyrics
+        key = LyricsCache.key(active.artist, active.title, active.album, active.duration)
+        if state is None or state.key != key:
+            return empty
+
+        lyrics = state.result
+        status = state.status
+        source = state.source
+        lyric_current = None
+        lyric_next = None
+        lyric_lines = None
+        lyric_pos = None
+        if active.position is not None:
+            # Positive lyric_offset_ms = lyrics appear later → look earlier in LRC.
+            lyric_pos = max(0.0, float(active.position) - (lyric_offset / 1000.0))
+
+        if lyrics is not None and status == LYRICS_STATUS_PLAIN:
+            lyric_lines = [
+                {"text": line.text} for line in lyrics.lines[:LYRIC_LINES_ATTR_MAX]
+            ]
+        elif lyrics is not None and status == LYRICS_STATUS_SYNCED and lyrics.lines:
+            if lyric_pos is not None:
+                lyric_current, lyric_next = line_at(lyrics.lines, lyric_pos)
+            lyric_lines = lines_payload(
+                lyrics.lines,
+                position=lyric_pos,
+                max_lines=LYRIC_LINES_ATTR_MAX,
+                before=LYRIC_LINES_WINDOW_BEFORE,
+            )
+        keep = status in (
+            LYRICS_STATUS_SYNCED,
+            LYRICS_STATUS_PLAIN,
+            LYRICS_STATUS_INSTRUMENTAL,
+        )
+        return {
+            "lyric_current": lyric_current,
+            "lyric_next": lyric_next,
+            "lyric_lines": lyric_lines,
+            "lyrics": lyrics if keep else None,
+            "lyrics_status": status,
+            "lyrics_source": source if keep else None,
+        }
+
+    def _publish_lyrics_state(self) -> None:
+        if self.data is None:
+            return
+        # Highlight from the last published position; the next poll uses the live one.
+        fields = self._lyric_fields(self.data.active, self.data.lyric_offset_ms)
+        updated = replace(self.data, **fields)
+        self._last_publish_fingerprint = self._data_fingerprint(updated)
+        self.async_set_updated_data(updated)
+
+    async def _run_lyrics(
+        self,
+        key: str,
+        artist: str,
+        title: str,
+        album: str | None,
+        duration: float | None,
+        providers: list[str],
+    ) -> None:
+        try:
+            outcome = await self._client().fetch(
+                artist=artist,
+                title=title,
+                album=album,
+                duration=duration,
+                fallback_providers=providers,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:  # noqa: BLE001 — surface as error, do not cache
+            _LOGGER.debug("Lyrics lookup failed for %s - %s: %s", artist, title, err)
+            outcome = LyricsLookup(LYRICS_STATUS_ERROR)
+        if not self._tracking_enabled or not self.lyrics_enabled:
+            return
+        if self._track_lyrics is None or self._track_lyrics.key != key:
+            return
+        status, result, source = _coerce_lookup(outcome)
+        self._track_lyrics = _TrackLyrics(
+            key=key,
+            status=status,
+            result=result,
+            source=source,
+            error_at=time.monotonic() if status == LYRICS_STATUS_ERROR else None,
+        )
+        self._publish_lyrics_state()
 
     def _artwork_resolver(self) -> ArtworkResolver:
         if self._artwork is None:
@@ -279,6 +494,7 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         self._unsub_state = async_track_state_change_event(self.hass, entities, _on_state)
 
     async def async_shutdown(self) -> None:
+        self._cancel_lyrics_task()
         self._async_cancel_cast_start_task()
         self._async_cancel_prefetch()
         self._async_stop_recast()
@@ -354,6 +570,8 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             artwork_source=None,
             artwork_next=None,
             lyrics_enabled=self.lyrics_enabled,
+            lyrics_status=None if self.lyrics_enabled else LYRICS_STATUS_DISABLED,
+            lyrics_source=None,
         )
 
     def _data_fingerprint(self, data: SpinJamData) -> tuple[Any, ...]:
@@ -375,6 +593,8 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             data.lyric_current,
             data.lyric_next,
             None if data.lyric_lines is None else len(data.lyric_lines),
+            data.lyrics_status,
+            data.lyrics_source,
             data.sync_offset_ms,
             data.lyric_offset_ms,
             data.album_lock,
@@ -401,6 +621,8 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
     async def _async_update_data(self) -> SpinJamData:
         # Tracking off: idle / no metadata (avoid stale "playing").
         if not self._tracking_enabled:
+            self._cancel_lyrics_task()
+            self._track_lyrics = None
             return self._publish_data(self._idle_data(tracking_enabled=False))
 
         options = self._options()
@@ -425,46 +647,12 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         # Throttle media_position attribute writes; keep a live estimate for lyrics.
         active = self._throttle_position_publish(live_active, prev_active)
 
-        lyrics: LyricsResult | None = None
-        lyric_current = None
-        lyric_next = None
-        lyric_lines = None
         artwork_hd = self.data.artwork_hd if self.data else None
         artwork_source = self.data.artwork_source if self.data else None
         artwork_next = self.data.artwork_next if self.data else None
 
-        if live_active and self.lyrics_enabled and live_active.artist and live_active.title:
-            key = (
-                f"{live_active.artist}|{live_active.title}|"
-                f"{live_active.album}|{live_active.duration}"
-            )
-            if key != self._last_lyrics_key or self.data.lyrics is None:
-                lyrics = await self._client().fetch(
-                    artist=live_active.artist,
-                    title=live_active.title,
-                    album=live_active.album,
-                    duration=live_active.duration,
-                )
-                self._last_lyrics_key = key
-            else:
-                lyrics = self.data.lyrics
-            lyric_pos = None
-            if live_active.position is not None:
-                # Positive lyric_offset_ms = lyrics appear later → look earlier in LRC.
-                lyric_pos = max(0.0, live_active.position - (lyric_offset / 1000.0))
-                if lyrics:
-                    lyric_current, lyric_next = line_at(lyrics.lines, lyric_pos)
-            if lyrics:
-                from .const import LYRIC_LINES_ATTR_MAX, LYRIC_LINES_WINDOW_BEFORE
-
-                lyric_lines = lines_payload(
-                    lyrics.lines,
-                    position=lyric_pos,
-                    max_lines=LYRIC_LINES_ATTR_MAX,
-                    before=LYRIC_LINES_WINDOW_BEFORE,
-                )
-        else:
-            self._last_lyrics_key = None
+        # Start the lookup before artwork so a fast cache hit can land during that await.
+        self._sync_lyrics_state(live_active)
 
         if live_active and self.hd_artwork_enabled and (live_active.artist or live_active.title):
             art_key = f"{live_active.artist}|{live_active.album}|{live_active.title}"
@@ -511,13 +699,12 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             self._async_cancel_prefetch()
             artwork_next = None
 
+        # Re-read after awaits so a lookup that finished during artwork is included.
+        lyric_fields = self._lyric_fields(live_active, lyric_offset)
+
         return self._publish_data(
             SpinJamData(
                 active=active,
-                lyric_current=lyric_current,
-                lyric_next=lyric_next,
-                lyric_lines=lyric_lines,
-                lyrics=lyrics,
                 album_lock=self.data.album_lock,
                 sync_offset_ms=sync_offset,
                 lyric_offset_ms=lyric_offset,
@@ -528,6 +715,7 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
                 artwork_source=artwork_source,
                 artwork_next=artwork_next,
                 lyrics_enabled=self.lyrics_enabled,
+                **lyric_fields,
             )
         )
 
@@ -657,6 +845,7 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
                 title=nxt.title,
                 album=nxt.album,
                 duration=nxt.duration,
+                fallback_providers=self._fallback_providers(),
             )
         return art_url
 
@@ -680,6 +869,8 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             artwork_source=held.artwork_source,
             artwork_next=art_url,
             lyrics_enabled=held.lyrics_enabled,
+            lyrics_status=held.lyrics_status,
+            lyrics_source=held.lyrics_source,
         )
         self.async_set_updated_data(updated)
         self._last_publish_fingerprint = self._data_fingerprint(updated)
@@ -729,51 +920,32 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         if self.lyrics_switch is not None and self.lyrics_switch.hass is not None:
             self.lyrics_switch.async_write_ha_state()
         if not enabled:
-            self._last_lyrics_key = None
+            self._track_lyrics = None
+            self._cancel_lyrics_task()
             held = self.data
-            self.async_set_updated_data(
-                SpinJamData(
-                    active=held.active,
-                    lyric_current=None,
-                    lyric_next=None,
-                    lyric_lines=None,
-                    lyrics=None,
-                    album_lock=held.album_lock,
-                    sync_offset_ms=held.sync_offset_ms,
-                    lyric_offset_ms=held.lyric_offset_ms,
-                    position_updated_at=held.position_updated_at,
-                    tracking_enabled=held.tracking_enabled,
-                    cast_active=self._cast_active,
-                    artwork_hd=held.artwork_hd,
-                    artwork_source=held.artwork_source,
-                    artwork_next=held.artwork_next,
-                    lyrics_enabled=False,
-                )
+            updated = replace(
+                held,
+                lyric_current=None,
+                lyric_next=None,
+                lyric_lines=None,
+                lyrics=None,
+                lyrics_status=LYRICS_STATUS_DISABLED,
+                lyrics_source=None,
+                lyrics_enabled=False,
             )
+            self.async_set_updated_data(updated)
             self._last_publish_fingerprint = self._data_fingerprint(self.data)
         elif self._tracking_enabled:
             await self.async_request_refresh()
         else:
             held = self.data
-            self.async_set_updated_data(
-                SpinJamData(
-                    active=held.active,
-                    lyric_current=held.lyric_current,
-                    lyric_next=held.lyric_next,
-                    lyric_lines=held.lyric_lines,
-                    lyrics=held.lyrics,
-                    album_lock=held.album_lock,
-                    sync_offset_ms=held.sync_offset_ms,
-                    lyric_offset_ms=held.lyric_offset_ms,
-                    position_updated_at=held.position_updated_at,
-                    tracking_enabled=held.tracking_enabled,
-                    cast_active=self._cast_active,
-                    artwork_hd=held.artwork_hd,
-                    artwork_source=held.artwork_source,
-                    artwork_next=held.artwork_next,
-                    lyrics_enabled=self.lyrics_enabled,
-                )
+            status = (
+                None
+                if held.lyrics_status == LYRICS_STATUS_DISABLED
+                else held.lyrics_status
             )
+            updated = replace(held, lyrics_enabled=True, lyrics_status=status)
+            self.async_set_updated_data(updated)
             self._last_publish_fingerprint = self._data_fingerprint(self.data)
 
     async def async_set_tracking(
@@ -802,7 +974,8 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
                 self._unsub_state()
                 self._unsub_state = None
             self._tracked = []
-            self._last_lyrics_key = None
+            self._cancel_lyrics_task()
+            self._track_lyrics = None
             self.async_set_updated_data(self._idle_data(tracking_enabled=False))
             self._last_publish_fingerprint = self._data_fingerprint(self.data)
         if self.tracking_switch is not None and self.tracking_switch.hass is not None:
@@ -821,26 +994,7 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         if self._tracking_enabled:
             await self.async_request_refresh()
         else:
-            held = self.data
-            self.async_set_updated_data(
-                SpinJamData(
-                    active=held.active,
-                    lyric_current=held.lyric_current,
-                    lyric_next=held.lyric_next,
-                    lyric_lines=held.lyric_lines,
-                    lyrics=held.lyrics,
-                    album_lock=held.album_lock,
-                    sync_offset_ms=offset_ms,
-                    lyric_offset_ms=held.lyric_offset_ms,
-                    position_updated_at=held.position_updated_at,
-                    tracking_enabled=held.tracking_enabled,
-                    cast_active=self._cast_active,
-                    artwork_hd=held.artwork_hd,
-                    artwork_source=held.artwork_source,
-                    artwork_next=held.artwork_next,
-                    lyrics_enabled=held.lyrics_enabled,
-                )
-            )
+            self.async_set_updated_data(replace(self.data, sync_offset_ms=offset_ms))
 
     async def async_set_lyric_offset(self, offset_ms: int) -> None:
         """Set lyric display offset (ms; positive = lyrics later). Live, no reload."""
@@ -851,32 +1005,9 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             self.lyric_offset_number._attr_native_value = float(offset_ms)  # noqa: SLF001
             self.lyric_offset_number.async_write_ha_state()
 
-        held = self.data
-        lyric_current = held.lyric_current
-        lyric_next = held.lyric_next
-        if held.lyrics and held.active and held.active.position is not None:
-            lyric_pos = max(0.0, held.active.position - (offset_ms / 1000.0))
-            lyric_current, lyric_next = line_at(held.lyrics.lines, lyric_pos)
-
-        self.async_set_updated_data(
-            SpinJamData(
-                active=held.active,
-                lyric_current=lyric_current,
-                lyric_next=lyric_next,
-                lyric_lines=held.lyric_lines,
-                lyrics=held.lyrics,
-                album_lock=held.album_lock,
-                sync_offset_ms=held.sync_offset_ms,
-                lyric_offset_ms=offset_ms,
-                position_updated_at=held.position_updated_at,
-                tracking_enabled=held.tracking_enabled,
-                cast_active=self._cast_active,
-                artwork_hd=held.artwork_hd,
-                artwork_source=held.artwork_source,
-                artwork_next=held.artwork_next,
-                lyrics_enabled=held.lyrics_enabled,
-            )
-        )
+        fields = self._lyric_fields(self.data.active, offset_ms)
+        updated = replace(self.data, lyric_offset_ms=offset_ms, **fields)
+        self.async_set_updated_data(updated)
         self._last_publish_fingerprint = self._data_fingerprint(self.data)
 
     async def async_identify(self) -> None:
@@ -1019,7 +1150,8 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             self._ending_cast = False
 
         await self.async_set_tracking(False, from_cast_stop=True)
-        self._last_lyrics_key = None
+        self._cancel_lyrics_task()
+        self._track_lyrics = None
         self.async_set_updated_data(self._idle_data(tracking_enabled=False))
         self._last_publish_fingerprint = self._data_fingerprint(self.data)
 
@@ -1181,6 +1313,8 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             ATTR_LYRIC_CURRENT: self.data.lyric_current,
             ATTR_LYRIC_NEXT: self.data.lyric_next,
             ATTR_LYRIC_LINES: self.data.lyric_lines,
+            ATTR_LYRICS_STATUS: self.data.lyrics_status,
+            ATTR_LYRICS_SOURCE: self.data.lyrics_source,
             ATTR_ALBUM_LOCK: self.data.album_lock,
             ATTR_DISPLAYS: list(self.displays),
             ATTR_SELECTED_DISPLAY: self.selected_display,

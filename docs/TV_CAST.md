@@ -109,8 +109,10 @@ Settings → Devices & services → SpinJam → Configure:
 | `artwork_source` | `itunes`, `coverartarchive`, or `entity_picture` |
 | `artwork_next` | Prefetched next-track HD URL when the queue exposes a next item |
 | `lyrics_enabled` | Mirrors `switch.spinjam_lyrics` (and config lyrics option) for the card |
+| `lyrics_status` | `synced`, `plain`, `instrumental`, `not_found`, `error`, or `disabled` (cover layout) |
+| `lyrics_source` | `lrclib`, `qqmusic`, or `lyricsovh` when a provider returned lyrics |
 
-Options **High-resolution album art** and **Prefetch** (defaults on) can disable those features.
+Options **High-resolution album art** and **Prefetch** (defaults on) can disable those features. **Fallback lyrics providers** (default lyrics.ovh) run after LRCLIB. QQ Music is an unofficial endpoint, for personal use, and stays off until selected.
 
 ## Usage
 
@@ -189,7 +191,8 @@ Official card: `custom:spinjam-lyrics-card`
 | Mode | Content |
 | --- | --- |
 | `details` | Large album art, title, artist, album, progress over a gradient |
-| `lyrics` | Centred, fading, karaoke-sweep lyrics (optional `show_header` / `show_progress` / `font_scale`) |
+| `lyrics` | Centred karaoke-sweep lyrics, or static centred text when `lyrics_status` is `plain`. A dim footer reads `Lyrics: LRCLIB`, `Lyrics: QQ Music`, or `Lyrics: lyrics.ovh`. `not_found` shows "Lyrics not available for this song"; `instrumental` shows "Instrumental". |
+| `cover` | Used when `switch.spinjam_lyrics` is off (`lyrics_status` `disabled`): full-screen art, no lyric sweep |
 
 Timing uses a **shared clock**: `media_position + (last_updated − media_position_updated_at)`, then advanced with `performance.now()` — the TV’s `Date.now()` is never compared to HA.
 

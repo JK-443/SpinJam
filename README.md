@@ -4,7 +4,7 @@
   <img src="images/logo-1024.png" alt="SpinJam" width="220" />
 </p>
 
-**General now-playing for Home Assistant.** SpinJam aggregates Music Assistant, Sonos, and a vinyl MQTT capture node into one unified `media_player`, with optional LRCLIB synced lyrics and Cast to a TV. Vinyl recognition runs on a dedicated Pi — never on the HA host.
+**General now-playing for Home Assistant.** SpinJam aggregates Music Assistant, Sonos, and a vinyl MQTT capture node into one unified `media_player`, with optional synced lyrics and Cast to a TV. Vinyl recognition runs on a dedicated Pi — never on the HA host.
 
 ## Pieces
 
@@ -23,7 +23,7 @@
 Music Assistant / Sonos media_players ──┐
                                         ├─► HA SpinJam ─► media_player.spinjam_now_playing
 Vinyl Pi (Shazam → MQTT) ───────────────┘         │
-                                                  ├─ LRCLIB lyrics (cached)
+                                                  ├─ Lyrics (LRCLIB, then fallbacks)
                                                   └─ cast.show_lovelace_view → TV
 ```
 
@@ -63,9 +63,17 @@ Copy `custom_components/spinjam` into your HA `config/custom_components/spinjam`
 | --- | --- |
 | `switch.spinjam_cast` | **Master on/off.** On = wake + cast + tracking on (`spinjam.start`); off = quit Cast, tracking off, clear now-playing (`spinjam.stop`). |
 | `switch.spinjam_tracking` | On (default) follows sources / polls; off clears now-playing and also stops Cast if active. Tracking on does not start Cast. |
-| `switch.spinjam_lyrics` | On (default) fetches/shows lyrics; off switches the TV card to a cover-art layout (live, no Cast restart). |
+| `switch.spinjam_lyrics` | On (default) fetches/shows lyrics; off switches the TV card to a cover-art layout and sets `lyrics_status` to `disabled` (live, no Cast restart). |
 
-Options: **Built-in casting** (default on) — when off, start/stop and the Cast switch only fire `spinjam_start` / `spinjam_stop` so you can cast from your own automations without double-casting. **Recast on startup** (default off) — only then will a previously-on Cast switch re-cast after an HA restart.
+Options: **Built-in casting** (default on) — when off, start/stop and the Cast switch only fire `spinjam_start` / `spinjam_stop` so you can cast from your own automations without double-casting. **Recast on startup** (default off) — only then will a previously-on Cast switch re-cast after an HA restart. **Fallback lyrics providers** (default lyrics.ovh) run in list order after LRCLIB misses. QQ Music is an unofficial endpoint, for personal use, and is off until selected. It can return synced lyrics; lyrics.ovh returns plain text.
+
+### Lyrics lookup
+
+1. LRCLIB `/api/get`, then `/api/search` (artist + title, duration within 3 s, prefer synced).
+2. The same calls again with a cleaned title (remaster, featured artist, live, version, radio edit), then a free-text search.
+3. Each selected fallback, in order. A miss is cached for 6 hours. Timeouts and server errors are not cached.
+
+`media_player.spinjam_now_playing` exposes `lyrics_status` (`synced`, `plain`, `instrumental`, `not_found`, `error`, `disabled`) and `lyrics_source` (`lrclib`, `qqmusic`, `lyricsovh`). Plain lyrics are static centred text. The TV card shows a dim footer (`Lyrics: LRCLIB`, `Lyrics: QQ Music`, `Lyrics: lyrics.ovh`). Lookups run in the background and do not block now-playing updates.
 
 ### Try it
 
@@ -74,7 +82,7 @@ Options: **Built-in casting** (default on) — when off, start/stop and the Cast
 3. Confirm artist/title/album/art; with lyrics enabled, check `lyric_current` / `lyric_next` / `lyric_lines`.  
 4. Services: `spinjam.identify`, `spinjam.set_sync_offset`, `spinjam.select_album`, `spinjam.clear_lock`, `spinjam.start`, `spinjam.stop`.
 5. Entities: `select.spinjam_display`, `switch.spinjam_cast`, `switch.spinjam_tracking`, `switch.spinjam_lyrics`, `number.spinjam_lyric_offset`.
-6. Attributes include `displays`, `selected_display`, `lyric_offset_ms`, `lyric_lines` (optional `words`), `tracking_enabled`, `cast_active`, `artwork_hd`, `artwork_source`, `artwork_next`, `lyrics_enabled`.
+6. Attributes include `displays`, `selected_display`, `lyric_offset_ms`, `lyric_lines` (optional `words`), `lyrics_status`, `lyrics_source`, `tracking_enabled`, `cast_active`, `artwork_hd`, `artwork_source`, `artwork_next`, `lyrics_enabled`.
 
 ## Vinyl capture node (optional source)
 

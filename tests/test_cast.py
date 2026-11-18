@@ -194,6 +194,10 @@ async def test_lyric_offset_positive_means_later(hass: HomeAssistant) -> None:
         coordinator = SpinJamCoordinator(hass, entry)
         await coordinator.async_set_tracking(True)
         await coordinator.async_refresh()
+        task = coordinator._lyrics_task  # noqa: SLF001
+        if task is not None:
+            await task
+        await hass.async_block_till_done()
 
     assert coordinator.data.lyric_current == "Everything"
     assert coordinator.data.lyric_offset_ms == 5000
