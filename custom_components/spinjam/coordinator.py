@@ -25,8 +25,10 @@ from .cast import (
     async_wake_display,
     cast_options,
 )
-from .cast_entities import cast_platform_status
+from .cast_entities import display_platform
 from .artwork import ArtworkResolver
+from .frame_art import async_fetch_artwork, async_push_cover, async_set_artmode
+from .tizen_display import async_exit_tizen_app, async_launch_tizen_app
 from .const import (
     ARTWORK_DISK_CACHE_DIR,
     ARTWORK_DISK_CACHE_FILE,
@@ -52,6 +54,7 @@ from .const import (
     CONF_DISPLAY_ENTITY,
     CONF_DISPLAYS,
     CONF_FALLBACK_PROVIDERS,
+    CONF_FRAME_ART_MODE,
     CONF_HD_ARTWORK,
     CONF_LYRIC_NUDGE_MS,
     CONF_LYRIC_OFFSET_MS,
@@ -63,11 +66,13 @@ from .const import (
     CONF_RECAST_WHILE_PLAYING,
     CONF_SOURCE_PLAYERS,
     CONF_SYNC_OFFSET_MS,
+    CONF_TIZEN_APP_ID,
     CONF_UPDATE_INTERVAL,
     CONF_VIEW_PATH,
     CONF_VINYL_PLAYER,
     DEFAULT_BUILTIN_CASTING,
     DEFAULT_FALLBACK_PROVIDERS,
+    DEFAULT_FRAME_ART_MODE,
     DEFAULT_HD_ARTWORK,
     DEFAULT_LYRIC_NUDGE_MS,
     DEFAULT_LYRIC_OFFSET_MS,
@@ -230,6 +235,11 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         self._last_pos_write_mono: float | None = None
         self._last_pos_write_value: float | None = None
         self._awaiting_mpua_after_track: datetime | None = None
+        self._frame_art_task: asyncio.Task[Any] | None = None
+        self._frame_art_content_id: str | None = None
+        self._frame_art_url: str | None = None
+        self._frame_art_active = False
+        self._pending_art_url: str | None = None
 
     def _client(self) -> LrcLibClient:
         if self._lyrics_client is None:
@@ -520,6 +530,16 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         )
 
     @property
+    def tizen_app_id(self) -> str:
+        """Installed Tizen application id from options. Empty until the user sets it."""
+        return str(self._options().get(CONF_TIZEN_APP_ID) or "").strip()
+
+    @property
+    def frame_art_mode(self) -> bool:
+        """Push the current cover to Frame Art Mode while lyrics are off."""
+        return bool(self._options().get(CONF_FRAME_ART_MODE, DEFAULT_FRAME_ART_MODE))
+
+    @property
     def cast_active(self) -> bool:
         return self._cast_active
 
@@ -566,6 +586,7 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         self._cancel_lyrics_task()
         self._async_cancel_cast_start_task()
         self._async_cancel_prefetch()
+        self._async_cancel_frame_art()
         self._async_stop_recast()
         self._async_unwatch_cast_display()
         if self._unsub_state:
@@ -586,6 +607,12 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
     def _async_cancel_cast_start_task(self) -> None:
         task = self._cast_start_task
         self._cast_start_task = None
+        if task is not None and not task.done():
+            task.cancel()
+
+    def _async_cancel_frame_art(self) -> None:
+        task = self._frame_art_task
+        self._frame_art_task = None
         if task is not None and not task.done():
             task.cancel()
 
@@ -781,6 +808,8 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
 
         # Re-read after awaits so a lookup that finished during artwork is included.
         lyric_fields = self._lyric_fields(live_active, lyric_offset)
+        next_art = artwork_hd or (live_active.art_url if live_active else None)
+        self._maybe_schedule_frame_art(next_art)
 
         return self._publish_data(
             SpinJamData(
@@ -1027,6 +1056,7 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
             updated = replace(held, lyrics_enabled=True, lyrics_status=status)
             self.async_set_updated_data(updated)
             self._last_publish_fingerprint = self._data_fingerprint(self.data)
+        self._maybe_schedule_frame_art(self._current_artwork_url(), force=True)
 
     async def async_set_tracking(
         self, enabled: bool, *, from_cast_stop: bool = False, refresh: bool = True
@@ -1148,16 +1178,19 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         await self.async_set_tracking(True, refresh=False)
 
         opts = cast_options(self._options())
-        do_builtin = self.builtin_casting
-        if do_builtin:
-            status = cast_platform_status(self.hass, target)
-            if status == "not_cast":
+        mode = "skip"
+        if self.builtin_casting:
+            kind = display_platform(self.hass, target)
+            if kind == "unsupported":
                 _LOGGER.warning(
-                    "Display %s is not a Google Cast entity (platform != cast); "
-                    "skipping cast.show_lovelace_view — spinjam_start will still fire",
+                    "Display %s is not a Google Cast or Samsung TV entity; "
+                    "skipping the built-in display launch — spinjam_start will still fire",
                     target,
                 )
-                do_builtin = False
+            elif kind == "samsungtv":
+                mode = "tizen"
+            else:
+                mode = "cast"
 
         # Optimistic on — background task reverts on failure.
         self._async_cancel_cast_start_task()
@@ -1167,7 +1200,7 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         self._cast_start_task = self._async_create_cast_start_task(
             self._async_start_background(
                 target,
-                do_builtin=do_builtin,
+                mode=mode,
                 dashboard_path=str(opts[CONF_DASHBOARD_PATH]),
                 view_path=str(opts[CONF_VIEW_PATH]),
                 opts=opts,
@@ -1179,7 +1212,7 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         self,
         target: str,
         *,
-        do_builtin: bool,
+        mode: str,
         dashboard_path: str,
         view_path: str,
         opts: dict[str, Any],
@@ -1198,11 +1231,12 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
                 raise
             except Exception:  # noqa: BLE001
                 _LOGGER.debug("SpinJam refresh during start failed", exc_info=True)
-            if not do_builtin:
+            if mode == "skip":
                 self._async_stop_recast()
                 return
             await self._async_cast_start_job(
                 target,
+                mode=mode,
                 dashboard_path=dashboard_path,
                 view_path=view_path,
                 opts=opts,
@@ -1226,20 +1260,30 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         self,
         target: str,
         *,
+        mode: str,
         dashboard_path: str,
         view_path: str,
         opts: dict[str, Any],
     ) -> None:
-        """Background wake → cast → verify; revert switch on failure."""
+        """Background wake → launch → verify; revert switch on failure.
+
+        ``mode`` is ``cast`` (Lovelace on a Google Cast device) or ``tizen``
+        (the SpinJam app on the Samsung TV the user selected).
+        """
         try:
-            ok = await self._async_cast_lovelace_view(
-                target,
-                dashboard_path=dashboard_path,
-                view_path=view_path,
-            )
+            if mode == "tizen":
+                ok = await async_launch_tizen_app(
+                    self.hass, target, self.tizen_app_id
+                )
+            else:
+                ok = await self._async_cast_lovelace_view(
+                    target,
+                    dashboard_path=dashboard_path,
+                    view_path=view_path,
+                )
             if not ok:
                 _LOGGER.warning(
-                    "SpinJam cast to %s failed — leaving switch.spinjam_cast off",
+                    "SpinJam display launch on %s failed — leaving switch.spinjam_cast off",
                     target,
                 )
                 if self._cast_active and self._cast_display == target:
@@ -1247,7 +1291,18 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
                     self._async_set_cast_active(False)
                 return
             if self._cast_active and self._cast_display == target:
-                self._async_schedule_recast(opts)
+                if mode == "tizen":
+                    # The TV app reconnects on its own. Relaunching on the
+                    # Cast interval would flash the dashboard.
+                    self._async_stop_recast()
+                    # Launching the app covers Art Mode. Drop the "already
+                    # showing" flag so lyrics-off uploads the cover again.
+                    self._frame_art_active = False
+                    self._maybe_schedule_frame_art(
+                        self._current_artwork_url(), force=True
+                    )
+                else:
+                    self._async_schedule_recast(opts)
                 self._warn_if_sources_look_like_arc(target)
         except asyncio.CancelledError:
             raise
@@ -1263,20 +1318,24 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
     async def async_stop(self) -> None:
         """End Cast, stop recast, disable tracking, and clear now-playing."""
         self._async_cancel_cast_start_task()
+        self._async_cancel_frame_art()
         self._async_stop_recast()
         display = self._cast_display or self.selected_display
         was_active = self._cast_active
         self._ending_cast = True
         try:
-            if (
-                display
-                and was_active
-                and self.builtin_casting
-                and cast_platform_status(self.hass, display) != "not_cast"
-            ):
-                await async_end_cast(self.hass, display)
-                if self.power_off_display_on_stop:
-                    await async_power_off_display(self.hass, display)
+            if display and was_active and self.builtin_casting:
+                kind = display_platform(self.hass, display)
+                if kind == "samsungtv":
+                    await async_exit_tizen_app(
+                        self.hass,
+                        display,
+                        power_off=self.power_off_display_on_stop,
+                    )
+                elif kind != "unsupported":
+                    await async_end_cast(self.hass, display)
+                    if self.power_off_display_on_stop:
+                        await async_power_off_display(self.hass, display)
             self._async_set_cast_active(False)
         finally:
             self._ending_cast = False
@@ -1334,6 +1393,14 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
                 )
                 self.hass.async_create_task(self.async_stop())
                 return
+            # Samsung TVs do not report the Lovelace app name. Ending the
+            # session on app_name would turn the switch off as soon as the
+            # Tizen app (or any other app) is what the TV is showing.
+            if (
+                self._cast_display
+                and display_platform(self.hass, self._cast_display) == "samsungtv"
+            ):
+                return
             app = new_state.attributes.get("app_name")
             if app and str(app) not in LOVELACE_APP_NAMES:
                 _LOGGER.debug(
@@ -1374,6 +1441,8 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
     async def _async_recast_tick(self) -> None:
         if not self.builtin_casting or not self._cast_active or not self._cast_display:
             return
+        if display_platform(self.hass, self._cast_display) == "samsungtv":
+            return
         active = self.data.active
         if active is None or not active.playing:
             return
@@ -1385,6 +1454,89 @@ class SpinJamCoordinator(DataUpdateCoordinator[SpinJamData]):
         )
         if not ok:
             _LOGGER.warning("SpinJam re-cast to %s failed", self._cast_display)
+
+    def _current_artwork_url(self) -> str | None:
+        data = self.data
+        if data is None:
+            return None
+        if data.artwork_hd:
+            return str(data.artwork_hd)
+        active = data.active
+        if active is not None and active.art_url:
+            return str(active.art_url)
+        return None
+
+    def _maybe_schedule_frame_art(
+        self, artwork_url: str | None, *, force: bool = False
+    ) -> None:
+        """Queue an Art Mode update when the option is on and a Frame session is up."""
+        if not self.frame_art_mode or not self._cast_active or not self._cast_display:
+            return
+        if display_platform(self.hass, self._cast_display) != "samsungtv":
+            return
+        if not force:
+            needs_upload = (
+                not self.lyrics_enabled
+                and bool(artwork_url)
+                and (not self._frame_art_active or artwork_url != self._frame_art_url)
+            )
+            needs_leave = self.lyrics_enabled and self._frame_art_active
+            if not needs_upload and not needs_leave:
+                return
+        self._pending_art_url = artwork_url
+        previous = self._frame_art_task
+        if previous is not None and not previous.done():
+            previous.cancel()
+        self._frame_art_task = self.hass.async_create_task(self._async_sync_frame_art())
+
+    async def _async_sync_frame_art(self) -> None:
+        """Upload the current cover, or leave Art Mode when lyrics come back."""
+        try:
+            display = self._cast_display
+            if not self.frame_art_mode or not display or not self._cast_active:
+                return
+            if display_platform(self.hass, display) != "samsungtv":
+                return
+            if self.lyrics_enabled:
+                if not self._frame_art_active:
+                    return
+                await async_set_artmode(self.hass, display, False)
+                self._frame_art_active = False
+                self._frame_art_url = None
+                if self.tizen_app_id:
+                    await async_launch_tizen_app(self.hass, display, self.tizen_app_id)
+                return
+            url = self._pending_art_url or self._current_artwork_url()
+            if self._frame_art_active and url == self._frame_art_url:
+                return
+            if not url:
+                _LOGGER.warning(
+                    "Frame Art Mode skipped: no album art for the current track"
+                )
+                return
+            fetched = await async_fetch_artwork(self.hass, url)
+            if fetched is None:
+                return
+            image, file_type = fetched
+            content_id = await async_push_cover(
+                self.hass,
+                display,
+                image,
+                file_type,
+                self._frame_art_content_id,
+            )
+            if not content_id:
+                return
+            self._frame_art_content_id = content_id
+            self._frame_art_url = url
+            self._frame_art_active = True
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 — art mode must not break now-playing
+            _LOGGER.warning("Frame Art Mode sync failed", exc_info=True)
+        finally:
+            if self._frame_art_task is asyncio.current_task():
+                self._frame_art_task = None
 
     async def _async_cast_lovelace_view(
         self,

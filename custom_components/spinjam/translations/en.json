@@ -3,11 +3,11 @@
     "step": {
       "user": {
         "title": "SpinJam",
-        "description": "Select the media players SpinJam should watch. Put higher-priority sources first. When a Sonos/Port source is Line-in, SpinJam uses the vinyl player instead. Optionally pick one or more Cast/TV displays.",
+        "description": "Select the media players SpinJam should watch. Put higher-priority sources first. When a Sonos/Port source is Line-in, SpinJam uses the vinyl player instead. Optionally pick one or more Google Cast or Samsung TV displays.",
         "data": {
           "name": "Name",
           "source_players": "Source media players",
-          "displays": "Cast display media players (optional)",
+          "displays": "Display media players (Cast or Samsung TV, optional)",
           "vinyl_player": "Vinyl MQTT media player",
           "lyrics_enabled": "Fetch LRCLIB synced lyrics",
           "sync_offset_ms": "Playback sync offset (ms)",
@@ -20,7 +20,7 @@
     },
     "error": {
       "no_sources": "Select at least one source media player.",
-      "displays_not_cast": "Every display must be a Google Cast media_player (entity registry platform = cast).",
+      "displays_not_cast": "Every display must be a Google Cast or Samsung TV media_player.",
       "invalid_path": "Dashboard path must be a lowercase slug that contains a hyphen (e.g. spinjam-tv).",
       "invalid_dashboard_path": "Dashboard path must be a lowercase slug that contains a hyphen (e.g. spinjam-tv).",
       "invalid_sync_offset": "Playback sync offset must be between -2000 and 2000 ms.",
@@ -31,11 +31,11 @@
     "step": {
       "init": {
         "title": "SpinJam options",
-        "description": "Update sources, displays, lyric timing, and Cast options. Defaults: dashboard_path=spinjam-tv, view_path=now. Prefer Google Cast media_players. Call spinjam.create_dashboard once or create the dashboard manually (see docs/TV_CAST.md). Fallback lyrics providers run in list order after LRCLIB. QQ Music is an unofficial endpoint, for personal use.",
+        "description": "Update sources, displays, lyric timing, and display options. Defaults: dashboard_path=spinjam-tv, view_path=now. Displays may be Google Cast or Samsung TV media players. Call spinjam.create_dashboard once or create the dashboard manually (see docs/TV_CAST.md). Fallback lyrics providers run in list order after LRCLIB. QQ Music is an unofficial endpoint, for personal use.",
         "data": {
           "name": "Name",
           "source_players": "Source media players",
-          "displays": "Cast display media players (optional)",
+          "displays": "Display media players (Cast or Samsung TV, optional)",
           "vinyl_player": "Vinyl MQTT media player",
           "lyrics_enabled": "Fetch LRCLIB synced lyrics",
           "fallback_providers": "Fallback lyrics providers",
@@ -43,7 +43,7 @@
           "lyric_offset_ms": "Lyric delay (ms; higher = lyrics later)",
           "lyric_nudge_ms": "Lyric delay step (ms)",
           "scale_lyrics": "Scale lyric timestamps when the edit length is slightly off",
-          "builtin_casting": "Built-in casting (cast.show_lovelace_view)",
+          "builtin_casting": "Built-in display launch (Cast, or the SpinJam Tizen app on a Samsung TV)",
           "dashboard_path": "Cast dashboard path (must include a hyphen)",
           "view_path": "Cast view path",
           "recast_while_playing": "Re-cast while playing (session drop recovery)",
@@ -51,32 +51,37 @@
           "recast_on_startup": "Re-cast on Home Assistant restart if Cast was on",
           "power_off_display_on_stop": "Power off display when stopping (default off; Cast quit leaves TV on)",
           "hd_artwork": "High-resolution album art (iTunes / Cover Art Archive)",
-          "prefetch": "Prefetch next-track art and lyrics when the queue exposes them"
+          "prefetch": "Prefetch next-track art and lyrics when the queue exposes them",
+          "tizen_app_id": "Tizen application id (Samsung TV)",
+          "frame_art_mode": "Frame Art Mode when lyrics are off"
         },
         "data_description": {
           "fallback_providers": "Tried in order after LRCLIB misses. QQ Music is an unofficial endpoint, for personal use. lyrics.ovh returns unsynced text.",
           "lyric_offset_ms": "Higher = lyrics appear later. Lower/negative = lyrics appear earlier.",
           "sync_offset_ms": "Added to the playhead. Lyric delay is separate: higher means lyrics appear later.",
           "lyric_nudge_ms": "How far the Lyrics earlier and Lyrics later buttons move the delay.",
-          "scale_lyrics": "Off by default. When on, synced timestamps stretch to the player length if the edit is off by 3–30 seconds."
+          "scale_lyrics": "Off by default. When on, synced timestamps stretch to the player length if the edit is off by 3–30 seconds.",
+          "tizen_app_id": "Installed app id from your TV certificate, such as AbCdEfGhIj.Display. Required to launch the SpinJam app. Leave blank if you only use Cast.",
+          "frame_art_mode": "Off by default. On a Samsung Frame, upload the current cover to Art Mode while lyrics are off. Needs samsungtvws or samsungframetv, and the token already stored by the Samsung TV integration."
         }
       }
     },
     "error": {
       "no_sources": "Select at least one source media player.",
-      "displays_not_cast": "Every display must be a Google Cast media_player (entity registry platform = cast).",
+      "displays_not_cast": "Every display must be a Google Cast or Samsung TV media_player.",
       "invalid_path": "Dashboard path must be a lowercase slug that contains a hyphen (e.g. spinjam-tv).",
       "invalid_view_path": "View path is required.",
       "invalid_sync_offset": "Playback sync offset must be between -2000 and 2000 ms.",
       "invalid_lyric_offset": "Lyric display offset must be between -5000 and 5000 ms.",
       "invalid_lyric_nudge": "Lyric delay step must be between 50 and 2000 ms.",
-      "invalid_recast_interval": "Re-cast interval must be between 15 and 300 seconds."
+      "invalid_recast_interval": "Re-cast interval must be between 15 and 300 seconds.",
+      "invalid_tizen_app_id": "Tizen application id must be the installed id from your certificate (letters, digits, dot, underscore, or hyphen)."
     }
   },
   "services": {
     "start": {
       "name": "Start SpinJam display",
-      "description": "Start source tracking and a SpinJam display session (optional built-in Cast) and fire spinjam_start. Same as turning on switch.spinjam_cast. Tracking follows Cast.",
+      "description": "Start source tracking and a SpinJam display session. Cast devices get the Lovelace view; Samsung TVs launch the SpinJam Tizen app. Same as turning on switch.spinjam_cast.",
       "fields": {
         "display": {
           "name": "Display",

@@ -1,9 +1,11 @@
 # TV now-playing + Cast
 
-SpinJam casts a full-screen now-playing Lovelace view to a Google Cast /
-Google TV `media_player` (e.g. `media_player.example_tv`) when you call
-`spinjam.start` or turn on `switch.spinjam_cast`. `spinjam.stop` / Cast switch
-off ends the session.
+SpinJam shows a full-screen now-playing Lovelace view when you call
+`spinjam.start` or turn on `switch.spinjam_cast`. `spinjam.stop` / the Cast
+switch off ends the session.
+
+- A Google Cast / Google TV `media_player` (for example `media_player.example_tv`) gets that view through `cast.show_lovelace_view`.
+- A Samsung TV `media_player` (for example `media_player.living_room_frame`) launches the SpinJam Tizen app, which loads the same dashboard. No Cast device is required. Setup: [`tizen/README.md`](../tizen/README.md).
 
 Browser Mod and Fully Kiosk are **not** required.
 
@@ -14,11 +16,10 @@ Home Assistant **requires a hyphen** in new dashboard URL paths (e.g.
 
 ### 1. Prerequisites
 
-1. **Google Cast** integration enabled; your TV appears as a Cast `media_player`
-   (entity registry platform `cast`). Non-cast displays are skipped at start
-   with a warning.
-2. Home Assistant reachable over **HTTPS** with a valid **External URL**
-   (Settings → System → Network). Cast cannot load HTTP-only dashboards.
+1. A display the integration can launch:
+   - **Google Cast** — the TV appears as a Cast `media_player` (entity registry platform `cast`). Cast needs Home Assistant reachable over **HTTPS** with a valid **External URL** (Settings → System → Network). Cast cannot load HTTP-only dashboards.
+   - **Samsung TV** — the Samsung TV integration’s `media_player` (platform `samsungtv`), plus the Tizen app installed on that TV. The app can load an `http://` address on the LAN. See [Samsung Frame TV](#samsung-frame-tv-tizen).
+2. Any other known `media_player` platform is skipped at start with a warning. `spinjam_start` still fires.
 3. SpinJam installed (HACS or manual). The custom card is registered at
    `/spinjam/spinjam-lyrics-card.js?v=<hash>` automatically — no separate frontend
    install.
@@ -83,8 +84,10 @@ casting so the new JS loads.
 
 Settings → Devices & services → SpinJam → Configure:
 
-- **Displays:** Google Cast targets only, e.g. `media_player.example_tv`
-- **Built-in casting:** on (default). When off, start/stop and `switch.spinjam_cast` only fire `spinjam_start` / `spinjam_stop` (no `cast.show_lovelace_view`) so you can cast from your own automations without double-casting. Events always fire either way.
+- **Displays:** Google Cast or Samsung TV targets, for example `media_player.example_tv` or `media_player.living_room_frame`. The picker lists media players; Cast and Samsung TV entities are accepted.
+- **Built-in display launch:** on (default). When off, start/stop and `switch.spinjam_cast` only fire `spinjam_start` / `spinjam_stop` (no Cast and no Tizen launch) so you can drive the TV from your own automations. Events always fire either way.
+- **Tizen application id:** blank unless you installed the SpinJam app on a Samsung TV. Use the id from your certificate, such as `AbCdEfGhIj.Display`. It is not built into the integration, because the prefix comes from the certificate you created.
+- **Frame Art Mode when lyrics are off:** off (default). See below.
 - **Cast dashboard path:** `spinjam-tv` (default; must contain a hyphen)
 - **Cast view path:** `now` (default)
 - **Re-cast while playing:** on (default) — recovers dropped Cast sessions
@@ -98,8 +101,8 @@ Device page order: **Cast**, **Display**, **Source**, **Lyrics**, **Now Playing*
 
 | Entity | Behaviour |
 | --- | --- |
-| `switch.spinjam_cast` | On → wake display if needed, cast Lovelace, enable tracking (`spinjam.start`). Off → quit Cast app, disable tracking, clear now-playing to idle (`spinjam.stop`). Tracking follows this switch. |
-| `select.spinjam_display` | Which configured display to use. Options are friendly names; a restored entity id still selects the same display. |
+| `switch.spinjam_cast` | On → wake the selected display, cast Lovelace or launch the Tizen app, enable tracking (`spinjam.start`). Off → quit Cast, or send Home on a Samsung TV, then disable tracking and clear now-playing (`spinjam.stop`). Tracking follows this switch. |
+| `select.spinjam_display` | Which configured display to use. Options are friendly names of the Cast and Samsung TV entities you picked. A restored entity id still selects the same display. |
 | `select.spinjam_source` | `Automatic` (default) or one configured player by friendly name, plus the vinyl player when configured. A fixed choice is the only now-playing source. Restored across restarts. Options refresh when sources change. |
 | `switch.spinjam_lyrics` | Off stops lyric fetches and switches the TV card live to one full-width stage. On restores the two-panel lyrics layout. Restored; default on. No Cast restart. |
 | `number.spinjam_lyric_offset` | **Lyric delay** in ms (**higher = lyrics appear later**). Configuration entity. Live — no reload. Restored. Range −5000…5000, step 100. |
@@ -214,12 +217,49 @@ Cast renders at **1080p** even on 4K TVs; the layout is tuned for that.
 the Lovelace/Cast app; the TV panel usually stays on). Optional **power off
 display when stopping** uses the paired `remote.*` entity when present.
 
+## Samsung Frame TV (Tizen)
+
+The app lives in [`tizen/`](../tizen/README.md), outside `custom_components/spinjam`, so HACS does not install it onto Home Assistant. You package and sideload the `.wgt` yourself (developer mode, a Samsung certificate, then `tizen package` / `tizen install`). The first launch on the TV asks for the dashboard URL and stores it in `localStorage`.
+
+Home Assistant login for that page is the `trusted_networks` auth provider. Lovelace does not accept a long-lived access token in the URL, so do not put one there. Details and the install steps are in the Tizen README.
+
+SpinJam launches whatever Samsung TV `media_player` is selected in options or on `select.spinjam_display`:
+
+1. `media_player.turn_on` if the TV is off or in standby.
+2. `media_player.play_media` with media type `app` and the **Tizen application id** option.
+
+If that id is blank, the launch fails, a warning is logged, and `switch.spinjam_cast` turns back off. `spinjam_start` has already fired.
+
+Stop sends `KEY_HOME` (media type `channel`) so the app closes and the panel stays on. **Power off display when stopping** powers the TV off instead. Cast still uses `media_player.turn_off`, which only quits the Cast app.
+
+### Frame Art Mode
+
+Option **Frame Art Mode when lyrics are off** defaults to off. When it is on, lyrics are off, and the active display is a Samsung TV:
+
+- SpinJam downloads the current album art (JPEG or PNG).
+- It uploads that image with the `samsungtvws` Art API (`tv.art().upload`, then `select_image`, then `set_artmode`). `samsungframetv` is the same library under its newer name. Whichever is installed is used. Neither is installed by the integration.
+- The host and websocket token are read from the Samsung TV config entry that owns the selected `media_player`. SpinJam does not open a pairing popup. If the entry has no token, or the library is missing, or the TV does not support Art Mode, it logs a warning and skips the upload.
+- The previous SpinJam upload is deleted when a new cover is accepted, so My Art does not fill up. A delete failure is ignored.
+- Turning lyrics back on leaves Art Mode and launches the Tizen app again so the dashboard is visible.
+- Stopping SpinJam does not clear Art Mode. The last cover stays until something else changes the TV.
+
+Install the library in the Home Assistant environment if you want this, for example `pip install samsungframetv` (or `samsungtvws` on an older pin). Restart Home Assistant after installing it.
+
+### Samsung limitations
+
+- The application id depends on your certificate. The placeholder in `config.xml` is rewritten when you sign the widget.
+- The dashboard URL is configured on the TV, not pushed from Home Assistant. It must match the dashboard you created (`spinjam-tv` / `now` by default).
+- The re-cast interval does not relaunch the Tizen app. The app reloads the page itself if the load fails or the network drops.
+- The session watcher does not end the switch when the Samsung TV reports a different app name. It still ends the session if that media player becomes unavailable.
+- `media_player.turn_off` on a Samsung TV powers the panel off, so stop does not call it unless **Power off display when stopping** is on.
+- Art Mode needs a Frame (or another Samsung TV that answers the art API), a stored websocket token, and the optional Python package. Other image types are skipped.
+
 ## Known limitations
 
 - Dashboard/view must exist before the first `spinjam.start` (use `spinjam.create_dashboard` or create manually; path needs a hyphen).
-- Cast requires HTTPS external URL; local HTTP-only setups will not work.
-- Displays should be Google Cast entities; other `media_player` platforms are skipped for built-in casting.
-- Re-cast briefly reloads the Lovelace view (possible flash every N seconds).
+- Cast requires an HTTPS external URL. The Tizen app can load HTTP on the LAN.
+- Displays must be Google Cast or Samsung TV entities. Other `media_player` platforms are skipped for the built-in launch.
+- Re-cast briefly reloads the Lovelace view on Cast devices (possible flash every N seconds). Samsung TVs are not re-launched on that interval.
 - `lyric_lines` is capped (~120 lines) to keep state attributes light on Pi 4.
-- Bravia / Google TV power policies may still sleep the panel after idle.
-- Album art URLs must be reachable from the Cast device (same as HA frontend).
+- Bravia / Google TV power policies may still sleep the panel after idle. The Tizen app asks the Samsung TV to keep the screen awake; the TV can still override that.
+- Album art URLs must be reachable from the Cast device or the Tizen app (same as the HA frontend). Frame Art Mode downloads the art on the Home Assistant host instead.
