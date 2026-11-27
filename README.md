@@ -60,9 +60,9 @@ Copy `custom_components/spinjam` into your HA `config/custom_components/spinjam`
 
 ### Samsung Frame TV, without Cast
 
-Install the Tizen app from [`tizen/`](tizen/README.md) (developer mode, your own certificate, then the `.wgt`). It is not copied in by HACS. On first launch the TV asks for the dashboard URL. In SpinJam options, pick that TV’s `media_player` and set the **Tizen application id** from your certificate (for example `AbCdEfGhIj.Display`). `switch.spinjam_cast` then launches the app via the Samsung TV integration.
+Install the Tizen app from [`tizen/`](tizen/README.md) (developer mode, your own certificate, then the `.wgt`). It is not copied in by HACS. The app draws now-playing itself; it does not load a Lovelace dashboard. On first launch the TV asks for the Home Assistant base address and a long-lived access token for a non-admin user. Trusted networks are no longer required. In SpinJam options, pick that TV’s media player and set the **Tizen application id** from your certificate (for example `AbCdEfGhIj.Display`). The Cast switch then launches the app via the Samsung TV integration.
 
-The dashboard login that works is Home Assistant’s `trusted_networks` provider. A long-lived access token in the URL is not supported by Lovelace. **Frame Art Mode** (default off) can push the album cover when lyrics are off if `samsungtvws` or `samsungframetv` is installed next to Home Assistant. Limits: [`docs/TV_CAST.md`](docs/TV_CAST.md#samsung-frame-tv-tizen).
+**Frame Art Mode** (default off) can push the album cover when lyrics are off if `samsungtvws` or `samsungframetv` is installed next to Home Assistant. Limits: [`docs/TV_CAST.md`](docs/TV_CAST.md#samsung-frame-tv-tizen).
 
 ### Controls
 

@@ -16,6 +16,7 @@ FILES = (
     "index.html",
     "icon.png",
     "css/app.css",
+    "js/logic.js",
     "js/app.js",
 )
 OUTPUT = ROOT / "SpinJam.wgt"
