@@ -26,7 +26,7 @@ ARTWORK_CACHE_SIZE = 64
 HTTP_TIMEOUT = ClientTimeout(total=6, connect=3, sock_read=5)
 MUSICBRAINZ_MIN_INTERVAL = 1.05  # respect ~1 req/s
 MUSICBRAINZ_USER_AGENT = (
-    "SpinJam/0.7.2 (https://github.com/JK-443/SpinJam; home-assistant-integration)"
+    "SpinJam/0.8.0 (https://github.com/JK-443/SpinJam; home-assistant-integration)"
 )
 
 # Disk writes are coalesced so a burst of resolves does not touch the filesystem

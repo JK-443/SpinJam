@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import voluptuous as vol
@@ -11,12 +12,13 @@ from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import selector
 
-from .cast_entities import non_cast_displays
+from .cast_entities import unsupported_displays
 from .const import (
     CONF_BUILTIN_CASTING,
     CONF_DASHBOARD_PATH,
     CONF_DISPLAYS,
     CONF_FALLBACK_PROVIDERS,
+    CONF_FRAME_ART_MODE,
     CONF_HD_ARTWORK,
     CONF_LYRIC_NUDGE_MS,
     CONF_LYRIC_OFFSET_MS,
@@ -29,6 +31,7 @@ from .const import (
     CONF_RECAST_WHILE_PLAYING,
     CONF_SOURCE_PLAYERS,
     CONF_SYNC_OFFSET_MS,
+    CONF_TIZEN_APP_ID,
     CONF_VIEW_PATH,
     CONF_VINYL_PLAYER,
     DEFAULT_BUILTIN_CASTING,
@@ -40,6 +43,7 @@ from .const import (
     DEFAULT_LYRICS_ENABLED,
     DEFAULT_SCALE_LYRICS,
     DEFAULT_NAME,
+    DEFAULT_FRAME_ART_MODE,
     DEFAULT_POWER_OFF_DISPLAY_ON_STOP,
     DEFAULT_PREFETCH,
     DEFAULT_RECAST_INTERVAL,
@@ -51,6 +55,9 @@ from .const import (
 )
 from .dashboard import validate_dashboard_url_path
 from .lyrics import normalize_fallback_providers
+
+# Certificate prefix, a dot, then the app name. Empty is allowed.
+_TIZEN_APP_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$")
 
 
 def entity_selector_supports_reorder() -> bool:
@@ -93,10 +100,13 @@ def source_players_selector() -> selector.EntitySelector:
 
 
 def displays_selector() -> selector.EntitySelector:
-    """Cast media_player picker when the selector supports integration filter."""
+    """Media-player picker for Cast and Samsung TV displays.
+
+    ``EntitySelector``'s integration filter accepts one platform. Filtering to
+    ``cast`` would hide Samsung TVs, so the picker lists media players and the
+    flow rejects anything that is not Cast or Samsung TV.
+    """
     kwargs: dict[str, Any] = {"domain": "media_player", "multiple": True}
-    if entity_selector_supports_integration_filter():
-        kwargs["integration"] = "cast"
     if entity_selector_supports_reorder():
         kwargs["reorder"] = True
         try:
@@ -265,6 +275,14 @@ def _schema(defaults: dict[str, Any] | None = None, *, options: bool = False) ->
             CONF_SCALE_LYRICS,
             default=defaults.get(CONF_SCALE_LYRICS, DEFAULT_SCALE_LYRICS),
         )] = _boolean_selector()
+        fields[vol.Optional(
+            CONF_TIZEN_APP_ID,
+            default=str(defaults.get(CONF_TIZEN_APP_ID) or ""),
+        )] = _text_selector()
+        fields[vol.Required(
+            CONF_FRAME_ART_MODE,
+            default=bool(defaults.get(CONF_FRAME_ART_MODE, DEFAULT_FRAME_ART_MODE)),
+        )] = _boolean_selector()
     return vol.Schema(fields)
 
 
@@ -338,14 +356,24 @@ def _validate_flow_input(
             else:
                 user_input[CONF_LYRIC_NUDGE_MS] = nudge
 
+        if CONF_TIZEN_APP_ID in user_input:
+            app_id = str(user_input.get(CONF_TIZEN_APP_ID) or "").strip()
+            if app_id and not _TIZEN_APP_ID_RE.fullmatch(app_id):
+                errors[CONF_TIZEN_APP_ID] = "invalid_tizen_app_id"
+            else:
+                user_input[CONF_TIZEN_APP_ID] = app_id
+
+        if CONF_FRAME_ART_MODE in user_input:
+            user_input[CONF_FRAME_ART_MODE] = bool(user_input.get(CONF_FRAME_ART_MODE))
+
     return errors
 
 
 async def _async_validate_cast_displays(
     hass: HomeAssistant, displays: list[str]
 ) -> str | None:
-    """Return an error key if any display is a known non-cast entity."""
-    bad = non_cast_displays(hass, displays)
+    """Return an error key if any display is not Cast or Samsung TV."""
+    bad = unsupported_displays(hass, displays)
     if not bad:
         return None
     return "displays_not_cast"

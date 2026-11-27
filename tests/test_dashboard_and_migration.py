@@ -174,7 +174,7 @@ def test_cast_view_migration_replaces_two_card_stack(caplog: pytest.LogCaptureFi
             }
         ]
     }
-    with caplog.at_level("INFO"):
+    with caplog.at_level("WARNING"):
         once = upgrade_dashboard_config(original)
         twice = upgrade_dashboard_config(once)
     view = once["views"][0]
@@ -183,7 +183,17 @@ def test_cast_view_migration_replaces_two_card_stack(caplog: pytest.LogCaptureFi
     assert view["cards"] == [CAST_CARD]
     assert "sections" not in view
     assert twice["views"][0] == view
-    assert sum("full-screen card" in rec.message for rec in caplog.records) == 1
+    assert (
+        sum(
+            "full-screen card" in rec.message and rec.levelname == "WARNING"
+            for rec in caplog.records
+        )
+        == 1
+    )
+    assert any(
+        "added the Controls view" in rec.message and rec.levelname == "WARNING"
+        for rec in caplog.records
+    )
 
 
 def test_cast_view_migration_keeps_user_cards(caplog: pytest.LogCaptureFixture) -> None:
@@ -490,10 +500,10 @@ async def test_upgrade_logs_when_lovelace_dashboards_missing(
         },
         unique_id=f"{DOMAIN}_lovelace_skip",
     )
-    with caplog.at_level("INFO"):
+    with caplog.at_level("WARNING"):
         assert await async_upgrade_configured_dashboard(hass, entry) is False
     assert any(
         "dashboard upgrade skipped" in rec.message.lower()
-        and rec.levelname == "INFO"
+        and rec.levelname == "WARNING"
         for rec in caplog.records
     )

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src * data: blob: 'unsafe-inline' 'unsafe-eval'; frame-src *; child-src *;">
+  <title>SpinJam</title>
+  <link rel="stylesheet" href="css/app.css">
+  <script src="$WEBAPIS/webapis/webapis.js"></script>
+</head>
+<body>
+  <section id="settings">
+    <form id="settings-form">
+      <p class="eyebrow">SpinJam</p>
+      <h1>Dashboard address</h1>
+      <p class="help">
+        Enter the Home Assistant view this TV should show full screen.
+        Example: <span class="example">https://homeassistant.local:8123/spinjam-tv/now</span>
+      </p>
+      <label for="dashboard-url">Address</label>
+      <input id="dashboard-url" type="url" inputmode="url" autocomplete="off" spellcheck="false" tabindex="0" placeholder="https://homeassistant.local:8123/spinjam-tv/now">
+      <p id="settings-error" class="error" role="alert"></p>
+      <div class="actions">
+        <button id="save" type="submit" tabindex="0">Save and open</button>
+        <button id="open" type="button" tabindex="0" hidden>Show dashboard</button>
+      </div>
+      <p class="hint">Use the remote to move, Enter to type or press a button, and Back to switch between this screen and the dashboard. Exit closes the app.</p>
+    </form>
+  </section>
+  <section id="viewer" hidden>
+    <iframe id="dashboard" title="SpinJam"></iframe>
+    <div id="status" hidden></div>
+  </section>
+  <script src="js/app.js"></script>
+</body>
+</html>

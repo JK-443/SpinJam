@@ -25,6 +25,8 @@ CONF_RECAST_ON_STARTUP = "recast_on_startup"
 CONF_POWER_OFF_DISPLAY_ON_STOP = "power_off_display_on_stop"
 CONF_HD_ARTWORK = "hd_artwork"
 CONF_PREFETCH = "prefetch"
+CONF_TIZEN_APP_ID = "tizen_app_id"
+CONF_FRAME_ART_MODE = "frame_art_mode"
 
 DEFAULT_NAME = "SpinJam Now Playing"
 DEFAULT_SYNC_OFFSET_MS = 0
@@ -45,6 +47,8 @@ DEFAULT_RECAST_ON_STARTUP = False
 DEFAULT_POWER_OFF_DISPLAY_ON_STOP = False
 DEFAULT_HD_ARTWORK = True
 DEFAULT_PREFETCH = True
+DEFAULT_TIZEN_APP_ID = ""
+DEFAULT_FRAME_ART_MODE = False
 
 # Options keys that can change live without reloading the config entry.
 LIVE_OPTIONS_KEYS = frozenset({CONF_SYNC_OFFSET_MS, CONF_LYRIC_OFFSET_MS})

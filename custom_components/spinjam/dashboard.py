@@ -480,17 +480,34 @@ def upgrade_cast_views(views: list[Any]) -> tuple[list[Any], list[str]]:
 
 
 def upgrade_dashboard_config(config: dict[str, Any]) -> dict[str, Any]:
-    """Upgrade the Cast view and the Controls view in place."""
+    """Upgrade the Cast view and the Controls view in place.
+
+    Layout changes are logged at warning so they show in the Home Assistant
+    system log. A second call that changes nothing logs nothing.
+    """
     raw_views = config.get("views")
     views = list(raw_views) if isinstance(raw_views, list) else []
+    before = _collect_entities(views)
     views, cast_notes = upgrade_cast_views(views)
     index = _controls_view_index(views)
+    added_controls = False
     if index is None:
         views.append(spinjam_controls_view_config())
+        added_controls = True
     else:
         views[index] = upgrade_controls_view(views[index])
-    for note in cast_notes:
-        _LOGGER.info("SpinJam dashboard layout: %s", note)
+    after = _collect_entities(views)
+    notes = list(cast_notes)
+    if added_controls:
+        notes.append("added the Controls view")
+    if SWITCH_TRACKING_ENTITY_ID in before and SWITCH_TRACKING_ENTITY_ID not in after:
+        notes.append("removed the retired tracking tile")
+    managed = MANAGED_CONTROL_ENTITIES | _LYRIC_DELAY_ENTITIES
+    for entity in sorted(after - before):
+        if entity in managed:
+            notes.append(f"added {entity}")
+    for note in notes:
+        _LOGGER.warning("SpinJam dashboard upgrade: %s", note)
     updated = dict(config)
     updated["views"] = views
     return updated
@@ -541,7 +558,7 @@ async def async_create_spinjam_dashboard(
     dashboards = _lovelace_dashboards(hass)
     collection = lovelace_value(hass, "dashboards_collection")
     if dashboards is None or collection is None:
-        _LOGGER.info(
+        _LOGGER.warning(
             "SpinJam dashboard create skipped: Lovelace dashboards are not available"
         )
         raise HomeAssistantError(
@@ -603,10 +620,14 @@ async def async_upgrade_configured_dashboard(hass: HomeAssistant, entry: Any) ->
     try:
         path = validate_dashboard_url_path(raw_path)
     except vol.Invalid:
+        _LOGGER.warning(
+            "SpinJam dashboard upgrade skipped: %s is not a valid dashboard path",
+            raw_path,
+        )
         return False
     dashboards = _lovelace_dashboards(hass)
     if dashboards is None:
-        _LOGGER.info(
+        _LOGGER.warning(
             "SpinJam dashboard upgrade skipped: Lovelace dashboards are not available"
         )
         return False
@@ -614,12 +635,15 @@ async def async_upgrade_configured_dashboard(hass: HomeAssistant, entry: Any) ->
         return False
     store = _dashboard_store(dashboards, path)
     if store is None:
-        _LOGGER.info(
+        _LOGGER.warning(
             "SpinJam dashboard upgrade skipped: no config store for %s", path
         )
         return False
     loaded = await _async_load_dashboard_config(store)
     if not loaded or not loaded.get("views"):
+        _LOGGER.warning(
+            "SpinJam dashboard upgrade skipped: no views saved for %s", path
+        )
         return False
     config = upgrade_dashboard_config(loaded)
     await store.async_save(config)

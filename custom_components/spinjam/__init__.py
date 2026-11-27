@@ -70,7 +70,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         await async_upgrade_configured_dashboard(hass, entry)
     except Exception:  # noqa: BLE001 — dashboard upgrade must not block setup
-        _LOGGER.debug("SpinJam controls dashboard was not upgraded", exc_info=True)
+        _LOGGER.warning("SpinJam dashboard upgrade failed", exc_info=True)
     return True
 
 

@@ -35,10 +35,12 @@ start:
   name: Start SpinJam display
   description: >
     Start source tracking and a display session. Selects a configured display
-    (or keeps select.spinjam_display), fires spinjam_start, and — when built-in
-    casting is enabled — casts the Lovelace view via cast.show_lovelace_view.
-    Same as turning on switch.spinjam_cast. Tracking follows Cast; there is no
-    separate tracking switch. Requires a one-time dashboard (see docs/TV_CAST.md).
+    (or keeps select.spinjam_display) and fires spinjam_start. When built-in
+    display launch is enabled, a Google Cast entity gets the Lovelace view
+    and a Samsung TV entity launches the SpinJam Tizen app
+    (media_player.play_media, media type app). Same as turning on
+    switch.spinjam_cast. The television and the Tizen application id both
+    come from options. Requires a one-time dashboard (see docs/TV_CAST.md).
   fields:
     display:
       name: Display
@@ -51,9 +53,10 @@ start:
 stop:
   name: Stop SpinJam display
   description: >
-    Stop source tracking and end the SpinJam cast session
-    (media_player.turn_off when built-in casting is on) and fire spinjam_stop.
-    Same as turning off switch.spinjam_cast.
+    Stop source tracking and end the SpinJam display session, then fire
+    spinjam_stop. Cast entities use media_player.turn_off (quits the Cast
+    app). Samsung TVs get the Home key so the panel stays on, unless power
+    off on stop is enabled. Same as turning off switch.spinjam_cast.
 
 create_dashboard:
   name: Create SpinJam dashboard
