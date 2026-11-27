@@ -5,7 +5,7 @@ SpinJam shows a full-screen now-playing Lovelace view when you call
 switch off ends the session.
 
 - A Google Cast / Google TV `media_player` (for example `media_player.example_tv`) gets that view through `cast.show_lovelace_view`.
-- A Samsung TV `media_player` (for example `media_player.living_room_frame`) launches the SpinJam Tizen app, which loads the same dashboard. No Cast device is required. Setup: [`tizen/README.md`](../tizen/README.md).
+- A Samsung TV media player launches the SpinJam Tizen app. The app draws now-playing on the TV and does not load the Lovelace dashboard. No Cast device is required. Setup: [`tizen/README.md`](../tizen/README.md).
 
 Browser Mod and Fully Kiosk are **not** required.
 
@@ -219,9 +219,9 @@ display when stopping** uses the paired `remote.*` entity when present.
 
 ## Samsung Frame TV (Tizen)
 
-The app lives in [`tizen/`](../tizen/README.md), outside `custom_components/spinjam`, so HACS does not install it onto Home Assistant. You package and sideload the `.wgt` yourself (developer mode, a Samsung certificate, then `tizen package` / `tizen install`). The first launch on the TV asks for the dashboard URL and stores it in `localStorage`.
+The app lives in [`tizen/`](../tizen/README.md), outside `custom_components/spinjam`, so HACS does not install it onto Home Assistant. You package and sideload the `.wgt` yourself (developer mode, a Samsung certificate, then `tizen package` / `tizen install`). The first launch on the TV asks for the Home Assistant base address and a long-lived access token and stores both in `localStorage`.
 
-Home Assistant login for that page is the `trusted_networks` auth provider. Lovelace does not accept a long-lived access token in the URL, so do not put one there. Details and the install steps are in the Tizen README.
+Create the token for a non-admin user that can read SpinJam. Trusted networks are no longer required. Details and the install steps are in the Tizen README.
 
 SpinJam launches whatever Samsung TV `media_player` is selected in options or on `select.spinjam_display`:
 
@@ -248,7 +248,7 @@ Install the library in the Home Assistant environment if you want this, for exam
 ### Samsung limitations
 
 - The application id depends on your certificate. The placeholder in `config.xml` is rewritten when you sign the widget.
-- The dashboard URL is configured on the TV, not pushed from Home Assistant. It must match the dashboard you created (`spinjam-tv` / `now` by default).
+- The Home Assistant address and access token are configured on the TV, not pushed from Home Assistant.
 - The re-cast interval does not relaunch the Tizen app. The app reloads the page itself if the load fails or the network drops.
 - The session watcher does not end the switch when the Samsung TV reports a different app name. It still ends the session if that media player becomes unavailable.
 - `media_player.turn_off` on a Samsung TV powers the panel off, so stop does not call it unless **Power off display when stopping** is on.

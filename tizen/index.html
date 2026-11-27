@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src * data: blob: 'unsafe-inline' 'unsafe-eval'; frame-src *; child-src *;">
+  <meta http-equiv="Content-Security-Policy" content="default-src * data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src *; img-src * data: blob:;">
   <title>SpinJam</title>
   <link rel="stylesheet" href="css/app.css">
   <script src="$WEBAPIS/webapis/webapis.js"></script>
@@ -12,25 +12,79 @@
   <section id="settings">
     <form id="settings-form">
       <p class="eyebrow">SpinJam</p>
-      <h1>Dashboard address</h1>
+      <h1>Home Assistant</h1>
       <p class="help">
-        Enter the Home Assistant view this TV should show full screen.
-        Example: <span class="example">https://homeassistant.local:8123/spinjam-tv/now</span>
+        Enter the base address, such as <span class="example">http://host:8123</span>,
+        and a long-lived access token for a user that is not an administrator.
+        The token stays on this TV. Trusted networks are not required.
       </p>
-      <label for="dashboard-url">Address</label>
-      <input id="dashboard-url" type="url" inputmode="url" autocomplete="off" spellcheck="false" tabindex="0" placeholder="https://homeassistant.local:8123/spinjam-tv/now">
+      <label for="ha-base-url">Address</label>
+      <input id="ha-base-url" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" tabindex="0" placeholder="http://host:8123">
+      <label for="ha-token">Access token</label>
+      <input id="ha-token" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" tabindex="0" placeholder="Long-lived access token">
       <p id="settings-error" class="error" role="alert"></p>
       <div class="actions">
-        <button id="save" type="submit" tabindex="0">Save and open</button>
-        <button id="open" type="button" tabindex="0" hidden>Show dashboard</button>
+        <button id="save" type="submit" tabindex="0">Save and connect</button>
+        <button id="open" type="button" tabindex="0" hidden>Show now playing</button>
       </div>
-      <p class="hint">Use the remote to move, Enter to type or press a button, and Back to switch between this screen and the dashboard. Exit closes the app.</p>
+      <p class="hint">Use the remote to move and Enter to type. Back on the waiting screen, or a long press of Back, opens this screen. Exit closes the app.</p>
     </form>
   </section>
-  <section id="viewer" hidden>
-    <iframe id="dashboard" title="SpinJam"></iframe>
-    <div id="status" hidden></div>
+  <section id="player" tabindex="-1" hidden>
+    <div id="banner" hidden></div>
+    <div id="idle">
+      <p class="eyebrow">SpinJam</p>
+      <h1 id="idle-title">Waiting for music</h1>
+      <p id="idle-sub" class="hint"></p>
+    </div>
+    <div id="cast" hidden>
+      <div class="art-pane">
+        <div class="art-stack">
+          <div id="la0" class="art-layer"></div>
+          <div id="la1" class="art-layer"></div>
+        </div>
+        <div class="shade"></div>
+        <div class="info">
+          <div id="cast-title" class="cast-title"></div>
+          <div id="cast-artist" class="cast-artist"></div>
+          <div id="cast-album" class="cast-album"></div>
+          <div id="cast-prog" class="prog">
+            <span id="cast-tl" class="tl">0:00</span>
+            <div class="bar"><div id="cast-fill" class="fillbar"></div></div>
+            <span id="cast-tr" class="tr">0:00</span>
+          </div>
+        </div>
+      </div>
+      <div class="lyrics-pane">
+        <p id="lyric-msg" class="msg" hidden></p>
+        <div id="lyric-vp" class="vp"><ul id="lyric-list"></ul></div>
+        <p id="lyric-attrib" class="attrib"></p>
+      </div>
+    </div>
+    <div id="stage" hidden>
+      <div id="stage-bg" class="stage-bg empty">
+        <div id="sb0" class="stage-blur"></div>
+        <div id="sb1" class="stage-blur"></div>
+        <div class="stage-dim"></div>
+      </div>
+      <div class="stage-col">
+        <div id="stage-art-wrap" class="stage-art-wrap">
+          <div id="sa0" class="stage-art"></div>
+          <div id="sa1" class="stage-art"></div>
+          <div class="stage-placeholder" aria-hidden="true">&#9834;</div>
+        </div>
+        <div id="stage-title" class="stage-title"></div>
+        <div id="stage-artist" class="stage-artist"></div>
+        <div id="stage-album" class="stage-album"></div>
+        <div id="stage-prog" class="prog">
+          <span id="stage-tl" class="tl">0:00</span>
+          <div class="bar"><div id="stage-fill" class="fillbar"></div></div>
+          <span id="stage-tr" class="tr">0:00</span>
+        </div>
+      </div>
+    </div>
   </section>
+  <script src="js/logic.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

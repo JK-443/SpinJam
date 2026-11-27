@@ -61,6 +61,15 @@ def test_parse_enhanced_word_tags() -> None:
     assert payload[0]["words"][0]["t"] == 12.0
 
 
+def test_lines_payload_exposes_sync_times() -> None:
+    """The Tizen app reads t (seconds) and text from lyric_lines."""
+    payload = lines_payload(parse_lrc("[00:01.50] Hello\n[00:03.00] There\n"))
+    assert payload == [
+        {"t": 1.5, "text": "Hello"},
+        {"t": 3.0, "text": "There"},
+    ]
+
+
 def test_lines_payload_windows_around_position() -> None:
     synced = "\n".join(f"[00:{i:02d}.00] Line {i}" for i in range(0, 60))
     # mm:ss only goes to 59 — build with minutes for a long list
